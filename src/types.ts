@@ -1,0 +1,356 @@
+/**
+ * TypeScript interfaces for Thenvoi platform integration.
+ */
+
+// =============================================================================
+// Configuration Types
+// =============================================================================
+
+export interface ThenvoiConfig {
+  apiKey: string;
+  agentId: string;
+  wsUrl: string;
+  restUrl: string;
+}
+
+export interface ThenvoiAccountConfig {
+  enabled?: boolean;
+  apiKey?: string;
+  agentId?: string;
+  wsUrl?: string;
+  restUrl?: string;
+}
+
+export interface ThenvoiChannelConfig {
+  accounts?: Record<string, ThenvoiAccountConfig>;
+}
+
+// =============================================================================
+// WebSocket Event Types (Phoenix Channels)
+// =============================================================================
+
+export interface PhoenixMessage<T = unknown> {
+  topic: string;
+  event: string;
+  payload: T;
+  ref: string | null;
+}
+
+// =============================================================================
+// Message Types
+// =============================================================================
+
+export interface MessageMetadata {
+  mentions?: Mention[];
+  status?: string;
+}
+
+export interface Mention {
+  id: string;
+  name: string;
+  type: "User" | "Agent";
+}
+
+export interface MessageCreatedPayload {
+  id: string;
+  content: string;
+  message_type: MessageType;
+  metadata: MessageMetadata;
+  sender_id: string;
+  sender_type: SenderType;
+  sender_name: string;
+  chat_room_id: string;
+  thread_id?: string;
+  inserted_at: string;
+  updated_at: string;
+}
+
+export type MessageType =
+  | "text"
+  | "thought"
+  | "error"
+  | "task"
+  | "tool_call"
+  | "tool_result";
+
+export type SenderType = "User" | "Agent" | "System";
+
+// =============================================================================
+// Room Types
+// =============================================================================
+
+export interface RoomOwner {
+  id: string;
+  name: string;
+  type: SenderType;
+}
+
+export interface RoomAddedPayload {
+  id: string;
+  owner: RoomOwner;
+  status: string;
+  type: string;
+  title: string;
+  created_at: string;
+  participant_role: ParticipantRole;
+}
+
+export interface RoomRemovedPayload {
+  id: string;
+}
+
+export type ParticipantRole = "owner" | "admin" | "member";
+
+// =============================================================================
+// Participant Types
+// =============================================================================
+
+export interface Participant {
+  id: string;
+  name: string;
+  type: SenderType;
+  role: ParticipantRole;
+}
+
+export interface ParticipantAddedPayload {
+  id: string;
+  name: string;
+  type: SenderType;
+  role: ParticipantRole;
+}
+
+export interface ParticipantRemovedPayload {
+  id: string;
+  name: string;
+}
+
+// =============================================================================
+// Agent Types
+// =============================================================================
+
+export interface AgentMetadata {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+}
+
+// =============================================================================
+// Peer Types (for lookup_peers)
+// =============================================================================
+
+export interface Peer {
+  id: string;
+  name: string;
+  type: SenderType;
+  description?: string;
+  status?: string;
+}
+
+export interface LookupPeersResponse {
+  peers: Peer[];
+  page: number;
+  page_size: number;
+  total_count: number;
+  has_more: boolean;
+}
+
+// =============================================================================
+// REST API Request/Response Types
+// =============================================================================
+
+export interface SendMessageRequest {
+  room_id: string;
+  content: string;
+  message_type?: MessageType;
+  mentions?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface SendMessageResponse {
+  id: string;
+  status: string;
+}
+
+export interface AddParticipantRequest {
+  name: string;
+  role?: ParticipantRole;
+}
+
+export interface AddParticipantResponse {
+  id: string;
+  name: string;
+  type: SenderType;
+  role: ParticipantRole;
+}
+
+export interface CreateChatroomRequest {
+  task_id?: string;
+}
+
+export interface CreateChatroomResponse {
+  id: string;
+  status: string;
+}
+
+// =============================================================================
+// Room State Management
+// =============================================================================
+
+export interface RoomState {
+  roomId: string;
+  title: string;
+  participants: Participant[];
+  lastMessageId?: string;
+  joinedAt: Date;
+}
+
+// =============================================================================
+// OpenClaw Channel Types
+// =============================================================================
+
+export interface OpenClawInboundMessage {
+  channelId: "thenvoi";
+  threadId: string;
+  senderId: string;
+  senderType: SenderType;
+  senderName: string;
+  text: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OpenClawOutboundMessage {
+  text: string;
+  threadId: string;
+  mentions?: string[];
+}
+
+// =============================================================================
+// MCP Tool Types
+// =============================================================================
+
+export interface LookupPeersParams {
+  page?: number;
+  page_size?: number;
+}
+
+export interface AddParticipantParams {
+  room_id: string;
+  name: string;
+  role?: ParticipantRole;
+}
+
+export interface RemoveParticipantParams {
+  room_id: string;
+  name: string;
+}
+
+export interface GetParticipantsParams {
+  room_id: string;
+}
+
+export interface CreateChatroomParams {
+  task_id?: string;
+}
+
+export interface SendEventParams {
+  room_id: string;
+  content: string;
+  message_type: "thought" | "error" | "task";
+}
+
+// =============================================================================
+// Event Types (for internal use)
+// =============================================================================
+
+export type ThenvoiEvent =
+  | { type: "message_created"; roomId: string; payload: MessageCreatedPayload }
+  | { type: "room_added"; payload: RoomAddedPayload }
+  | { type: "room_removed"; payload: RoomRemovedPayload }
+  | { type: "participant_added"; roomId: string; payload: ParticipantAddedPayload }
+  | { type: "participant_removed"; roomId: string; payload: ParticipantRemovedPayload };
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+export class ThenvoiError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly statusCode?: number,
+  ) {
+    super(message);
+    this.name = "ThenvoiError";
+  }
+}
+
+export class ThenvoiConnectionError extends ThenvoiError {
+  constructor(message: string) {
+    super(message, "CONNECTION_ERROR");
+    this.name = "ThenvoiConnectionError";
+  }
+}
+
+export class ThenvoiAuthError extends ThenvoiError {
+  constructor(message: string) {
+    super(message, "AUTH_ERROR", 401);
+    this.name = "ThenvoiAuthError";
+  }
+}
+
+// =============================================================================
+// Message Recovery Types
+// =============================================================================
+
+/**
+ * Message status for tracking processing state.
+ */
+export type MessageStatus = "pending" | "processing" | "processed" | "failed";
+
+/**
+ * Response from GET /api/agent/next endpoint.
+ * Returns the next unprocessed message from the backlog.
+ */
+export interface NextMessageResponse {
+  id: string;
+  content: string;
+  message_type: MessageType;
+  metadata: MessageMetadata;
+  sender_id: string;
+  sender_type: SenderType;
+  sender_name: string;
+  chat_room_id: string;
+  thread_id?: string;
+  inserted_at: string;
+  updated_at: string;
+  status: MessageStatus;
+}
+
+/**
+ * Response when no pending messages are available.
+ */
+export interface NoMessageResponse {
+  message: "no_pending_messages";
+}
+
+// =============================================================================
+// Reconnection Types
+// =============================================================================
+
+/**
+ * Configuration for reconnection behavior.
+ */
+export interface ReconnectConfig {
+  /** Initial delay in milliseconds before first reconnection attempt */
+  baseDelayMs: number;
+  /** Maximum delay in milliseconds between reconnection attempts */
+  maxDelayMs: number;
+  /** Multiplier for exponential backoff */
+  multiplier: number;
+  /** Jitter factor (0-1) to prevent thundering herd */
+  jitterFactor: number;
+  /** Maximum number of reconnection attempts before giving up */
+  maxAttempts: number;
+}

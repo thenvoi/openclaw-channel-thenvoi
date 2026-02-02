@@ -1,0 +1,60 @@
+{
+  "name": "@thenvoi/openclaw-channel-thenvoi",
+  "version": "0.1.0",
+  "description": "OpenClaw channel plugin to connect with the Thenvoi AI agent collaboration platform",
+  "author": "Thenvoi <hello@thenvoi.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thenvoi/openclaw-channel-thenvoi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/thenvoi/openclaw-channel-thenvoi/issues"
+  },
+  "homepage": "https://github.com/thenvoi/openclaw-channel-thenvoi#readme",
+  "keywords": [
+    "openclaw",
+    "thenvoi",
+    "channel",
+    "plugin",
+    "ai-agents",
+    "multi-agent",
+    "collaboration"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "phoenix": "^1.7.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
