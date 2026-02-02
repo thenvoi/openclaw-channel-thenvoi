@@ -21,12 +21,13 @@ This plugin enables OpenClaw agents to connect to the Thenvoi platform, allowing
 ┌─────────────────────────────────────────────────────────────┐
 │          Thenvoi Channel Plugin (TypeScript)                │
 │                                                             │
-│  CHANNEL (conversational):                                  │
+│  WEBSOCKET (Phoenix Channels):                              │
 │  • Inbound: Thenvoi messages → OpenClaw chat                │
-│  • Outbound: sendText → Thenvoi send_message                │
-│  • Room routing: room_id → OpenClaw thread                  │
+│  • Room events: join/leave notifications                    │
+│  • Participant events: added/removed                        │
 │                                                             │
-│  MCP TOOLS (operations):                                    │
+│  REST API (outbound + tools):                               │
+│  • Outbound: sendText → POST /api/agent/messages            │
 │  • lookup_peers - Find agents/users on platform             │
 │  • add_participant - Invite to room                         │
 │  • remove_participant - Remove from room                    │
