@@ -34,10 +34,10 @@ describe("ThenvoiClient", () => {
         restUrl: "https://api.thenvoi.com/",
       };
       const clientWithSlash = new ThenvoiClient(configWithSlash);
-      mockFetchOnce(fetchMock, { response: mockAgentMetadata });
+      mockFetchOnce(fetchMock, { response: { data: mockAgentMetadata } });
       clientWithSlash.getAgentMe();
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://api.thenvoi.com/api/agent/me",
+        "https://api.thenvoi.com/api/v1/agent/me",
         expect.any(Object),
       );
     });
@@ -45,19 +45,18 @@ describe("ThenvoiClient", () => {
 
   describe("getAgentMe", () => {
     it("should fetch agent metadata successfully", async () => {
-      mockFetchOnce(fetchMock, { response: mockAgentMetadata });
+      mockFetchOnce(fetchMock, { response: { data: mockAgentMetadata } });
 
       const result = await client.getAgentMe();
 
       expect(result).toEqual(mockAgentMetadata);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/agent/me",
+        "https://test.thenvoi.com/api/v1/agent/me",
         expect.objectContaining({
           method: "GET",
           headers: {
-            Authorization: "Bearer test-api-key-12345",
+            "X-API-Key": "test-api-key-12345",
             "Content-Type": "application/json",
-            "X-Agent-ID": "agent-123",
           },
         }),
       );
@@ -92,49 +91,74 @@ describe("ThenvoiClient", () => {
 
   describe("sendMessage", () => {
     it("should send message with correct payload", async () => {
-      mockFetchOnce(fetchMock, { response: mockSendMessageResponse });
+      const mockResponse = {
+        id: "msg-new-001",
+        chat_room_id: "room-001",
+        recipients: [{ id: "user-1", name: "John" }],
+        success: true,
+      };
+      mockFetchOnce(fetchMock, { response: { data: mockResponse } });
 
-      const result = await client.sendMessage("room-001", "Hello!", ["John"]);
+      const result = await client.sendMessage("room-001", "Hello!", [
+        { id: "user-1", name: "John" },
+      ]);
 
-      expect(result).toEqual(mockSendMessageResponse);
+      expect(result).toEqual(mockResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/agent/messages",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/messages",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            room_id: "room-001",
-            content: "Hello!",
-            message_type: "text",
-            mentions: ["John"],
+            message: {
+              content: "Hello!",
+              mentions: [{ id: "user-1", name: "John" }],
+            },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("sendEvent", () => {
+    it("should send thought event", async () => {
+      const mockResponse = {
+        id: "event-001",
+        chat_room_id: "room-001",
+        message_type: "thought",
+        success: true,
+      };
+      mockFetchOnce(fetchMock, { response: { data: mockResponse } });
+
+      const result = await client.sendEvent("room-001", "Thinking...", "thought");
+
+      expect(result).toEqual(mockResponse);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/events",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            event: {
+              content: "Thinking...",
+              message_type: "thought",
+            },
           }),
         }),
       );
     });
 
-    it("should use empty mentions array when not provided", async () => {
-      mockFetchOnce(fetchMock, { response: mockSendMessageResponse });
+    it("should send error event", async () => {
+      const mockResponse = {
+        id: "event-002",
+        chat_room_id: "room-001",
+        message_type: "error",
+        success: true,
+      };
+      mockFetchOnce(fetchMock, { response: { data: mockResponse } });
 
-      await client.sendMessage("room-001", "Hello!");
+      const result = await client.sendEvent("room-001", "Error occurred", "error");
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          body: expect.stringContaining('"mentions":[]'),
-        }),
-      );
-    });
-
-    it("should send event messages with correct type", async () => {
-      mockFetchOnce(fetchMock, { response: mockSendMessageResponse });
-
-      await client.sendMessage("room-001", "Thinking...", [], "thought");
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          body: expect.stringContaining('"message_type":"thought"'),
-        }),
-      );
+      expect(result.success).toBe(true);
+      expect(result.message_type).toBe("error");
     });
   });
 
@@ -145,7 +169,7 @@ describe("ThenvoiClient", () => {
       await client.markMessageProcessing("room-001", "msg-001");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/agent/chats/room-001/messages/msg-001/processing",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/messages/msg-001/processing",
         expect.objectContaining({ method: "POST" }),
       );
     });
@@ -158,7 +182,7 @@ describe("ThenvoiClient", () => {
       await client.markMessageProcessed("room-001", "msg-001");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/agent/chats/room-001/messages/msg-001/processed",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/messages/msg-001/processed",
         expect.objectContaining({ method: "POST" }),
       );
     });
@@ -171,7 +195,7 @@ describe("ThenvoiClient", () => {
       await client.markMessageFailed("room-001", "msg-001", "Processing failed");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/agent/chats/room-001/messages/msg-001/failed",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/messages/msg-001/failed",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({ error: "Processing failed" }),
@@ -188,7 +212,18 @@ describe("ThenvoiClient", () => {
 
       expect(result).toEqual(mockNextMessageResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/agent/next",
+        "https://test.thenvoi.com/api/v1/agent/messages/next",
+        expect.objectContaining({ method: "GET" }),
+      );
+    });
+
+    it("should use chat-specific endpoint when chatId provided", async () => {
+      mockFetchOnce(fetchMock, { response: mockNextMessageResponse });
+
+      await client.getNextMessage("room-001");
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/next",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -220,24 +255,28 @@ describe("ThenvoiClient", () => {
 
   describe("lookupPeers", () => {
     it("should use default pagination", async () => {
-      mockFetchOnce(fetchMock, { response: mockLookupPeersResponse });
+      mockFetchOnce(fetchMock, {
+        response: { data: mockLookupPeersResponse.peers, metadata: {} },
+      });
 
       const result = await client.lookupPeers();
 
-      expect(result).toEqual(mockLookupPeersResponse);
+      expect(result.peers).toBeDefined();
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/peers?page=1&page_size=50",
+        "https://test.thenvoi.com/api/v1/agent/peers?page=1&page_size=50",
         expect.any(Object),
       );
     });
 
     it("should use provided pagination", async () => {
-      mockFetchOnce(fetchMock, { response: mockLookupPeersResponse });
+      mockFetchOnce(fetchMock, {
+        response: { data: mockLookupPeersResponse.peers, metadata: {} },
+      });
 
       await client.lookupPeers(2, 25);
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/peers?page=2&page_size=25",
+        "https://test.thenvoi.com/api/v1/agent/peers?page=2&page_size=25",
         expect.any(Object),
       );
     });
@@ -247,14 +286,16 @@ describe("ThenvoiClient", () => {
     it("should send correct payload with default role", async () => {
       mockFetchOnce(fetchMock, { response: mockAddParticipantResponse });
 
-      const result = await client.addParticipant("room-001", "Weather Agent");
+      const result = await client.addParticipant("room-001", "agent-456");
 
       expect(result).toEqual(mockAddParticipantResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/rooms/room-001/participants",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/participants",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ name: "Weather Agent", role: "member" }),
+          body: JSON.stringify({
+            participant: { participant_id: "agent-456", role: "member" },
+          }),
         }),
       );
     });
@@ -262,25 +303,27 @@ describe("ThenvoiClient", () => {
     it("should use provided role", async () => {
       mockFetchOnce(fetchMock, { response: mockAddParticipantResponse });
 
-      await client.addParticipant("room-001", "Admin User", "admin");
+      await client.addParticipant("room-001", "admin-789", "admin");
 
       expect(fetchMock).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          body: JSON.stringify({ name: "Admin User", role: "admin" }),
+          body: JSON.stringify({
+            participant: { participant_id: "admin-789", role: "admin" },
+          }),
         }),
       );
     });
   });
 
   describe("removeParticipant", () => {
-    it("should URL encode participant name", async () => {
+    it("should URL encode participant ID", async () => {
       mockFetchOnce(fetchMock, { status: 204, response: undefined });
 
-      await client.removeParticipant("room-001", "Weather Agent");
+      await client.removeParticipant("room-001", "user-123");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/rooms/room-001/participants/Weather%20Agent",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/participants/user-123",
         expect.objectContaining({ method: "DELETE" }),
       );
     });
@@ -288,7 +331,7 @@ describe("ThenvoiClient", () => {
 
   describe("getParticipants", () => {
     it("should return participants array", async () => {
-      mockFetchOnce(fetchMock, { response: { participants: mockParticipants } });
+      mockFetchOnce(fetchMock, { response: { data: mockParticipants } });
 
       const result = await client.getParticipants("room-001");
 
@@ -296,31 +339,31 @@ describe("ThenvoiClient", () => {
     });
   });
 
-  describe("createChatroom", () => {
+  describe("createChat", () => {
     it("should create room without task_id", async () => {
-      mockFetchOnce(fetchMock, { response: mockCreateChatroomResponse });
+      mockFetchOnce(fetchMock, { response: { data: mockCreateChatroomResponse } });
 
-      const result = await client.createChatroom();
+      const result = await client.createChat();
 
       expect(result).toEqual(mockCreateChatroomResponse);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/rooms",
+        "https://test.thenvoi.com/api/v1/agent/chats",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({}),
+          body: JSON.stringify({ chat: {} }),
         }),
       );
     });
 
     it("should create room with task_id", async () => {
-      mockFetchOnce(fetchMock, { response: mockCreateChatroomResponse });
+      mockFetchOnce(fetchMock, { response: { data: mockCreateChatroomResponse } });
 
-      await client.createChatroom("task-123");
+      await client.createChat("task-123");
 
       expect(fetchMock).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          body: JSON.stringify({ task_id: "task-123" }),
+          body: JSON.stringify({ chat: { task_id: "task-123" } }),
         }),
       );
     });

@@ -1,0 +1,33 @@
+# OpenClaw Configuration
+# https://docs.openclaw.ai/configuration
+
+gateway:
+  port: 18789
+  bind: "0.0.0.0"
+
+# Plugin configuration
+plugins:
+  enabled: true
+  load:
+    paths:
+      - /home/node/.openclaw/plugins/thenvoi
+  entries:
+    thenvoi:
+      enabled: true
+
+# Channel configuration
+channels:
+  thenvoi:
+    enabled: true
+    accounts:
+      default:
+        enabled: true
+        # Credentials loaded from environment variables:
+        # - THENVOI_API_KEY
+        # - THENVOI_AGENT_ID
+        # - THENVOI_API_KEY_USER
+
+# Agent configuration
+agent:
+  model: claude-sonnet-4-20250514
+  maxTurns: 50

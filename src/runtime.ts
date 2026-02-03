@@ -6,11 +6,13 @@
  */
 
 import { Socket, Channel } from "phoenix";
+import WebSocket from "ws";
 
 import type {
   MessageCreatedPayload,
   NextMessageResponse,
   OpenClawInboundMessage,
+  Participant,
   ParticipantAddedPayload,
   ParticipantRemovedPayload,
   ReconnectConfig,
@@ -58,6 +60,9 @@ export class ThenvoiRuntime {
   private isSynchronizing = false;
   private processedMessageIds: Set<string> = new Set();
 
+  // Queue for WS messages that arrive during sync (like Python SDK)
+  private pendingWsMessages: Array<{ roomId: string; payload: MessageCreatedPayload }> = [];
+
   // Reconnection state
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -96,12 +101,14 @@ export class ThenvoiRuntime {
     this.intentionalDisconnect = false;
 
     return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.socket = new Socket(this.config.wsUrl, {
         params: {
-          token: this.config.apiKey,
+          api_key: this.config.apiKey,
           agent_id: this.config.agentId,
         },
-      });
+        transport: WebSocket as any,
+      } as any);
 
       this.setupSocketHandlers();
 
@@ -113,6 +120,9 @@ export class ThenvoiRuntime {
 
           // Join agent channel
           await this.joinAgentChannel();
+
+          // Fetch and join existing rooms
+          await this.joinExistingRooms();
 
           // Synchronize with backlog
           await this.synchronizeWithBacklog();
@@ -170,6 +180,7 @@ export class ThenvoiRuntime {
     this.reconnectAttempts = 0;
     this.syncPointMessageId = null;
     this.processedMessageIds.clear();
+    this.pendingWsMessages = [];
     this.rooms.clear();
   }
 
@@ -259,14 +270,17 @@ export class ThenvoiRuntime {
     this.agentChannel = null;
     this.roomChannels.clear();
     this.syncPointMessageId = null; // Reset sync point for new sync
+    this.pendingWsMessages = []; // Clear pending queue for fresh sync
 
     // Create new socket
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.socket = new Socket(this.config.wsUrl, {
       params: {
-        token: this.config.apiKey,
+        api_key: this.config.apiKey,
         agent_id: this.config.agentId,
       },
-    });
+      transport: WebSocket as any,
+    } as any);
 
     // Set up socket handlers
     this.setupSocketHandlers();
@@ -330,53 +344,212 @@ export class ThenvoiRuntime {
 
   /**
    * Synchronize with message backlog using the sync point pattern.
+   * Syncs each room individually like the Python SDK.
    */
   private async synchronizeWithBacklog(): Promise<void> {
     this.isSynchronizing = true;
     this.callbacks.onSyncStarted?.();
 
-    let processedCount = 0;
+    let totalProcessedCount = 0;
 
     try {
-      while (true) {
-        const message = await this.client.getNextMessage();
+      // Sync each room individually (like Python SDK)
+      for (const [roomId, _roomState] of this.rooms) {
+        console.log(`[thenvoi] Syncing backlog for room ${roomId}...`);
+        let roomProcessedCount = 0;
 
-        // No more backlog messages
-        if (!message) {
-          break;
-        }
+        while (true) {
+          // Use per-room endpoint like Python SDK
+          const message = await this.client.getNextMessage(roomId);
 
-        // Reached sync point - backlog complete
-        if (this.syncPointMessageId && message.id === this.syncPointMessageId) {
-          // Still process this message as it's the first WS message we received
+          // No more backlog messages for this room
+          if (!message) {
+            console.log(`[thenvoi] Room ${roomId}: no more backlog messages`);
+            break;
+          }
+
+          console.log(`[thenvoi] Room ${roomId}: got backlog message ${message.id} from ${message.sender_name ?? message.sender_type}`);
+
+          // Reached sync point - backlog complete
+          if (this.syncPointMessageId && message.id === this.syncPointMessageId) {
+            console.log(`[thenvoi] Room ${roomId}: reached sync point`);
+            // Still process this message as it's the first WS message we received
+            await this.processBacklogMessage(message);
+            roomProcessedCount++;
+            break;
+          }
+
+          // Skip own messages (must call processing before processed per API spec)
+          if (message.sender_id === this.config.agentId) {
+            console.log(`[thenvoi] Room ${roomId}: skipping own message ${message.id}`);
+            try {
+              await this.client.markMessageProcessing(message.chat_room_id, message.id);
+              await this.client.markMessageProcessed(message.chat_room_id, message.id);
+            } catch {
+              // Ignore errors - message may already be processed
+            }
+            continue;
+          }
+
+          // Skip non-text messages (must call processing before processed per API spec)
+          if (message.message_type !== "text") {
+            console.log(`[thenvoi] Room ${roomId}: skipping non-text message ${message.id} (type: ${message.message_type})`);
+            try {
+              await this.client.markMessageProcessing(message.chat_room_id, message.id);
+              await this.client.markMessageProcessed(message.chat_room_id, message.id);
+            } catch {
+              // Ignore errors - message may already be processed
+            }
+            continue;
+          }
+
+          // Process the backlog message
           await this.processBacklogMessage(message);
-          processedCount++;
-          break;
+          roomProcessedCount++;
         }
 
-        // Skip own messages
-        if (message.sender_id === this.config.agentId) {
-          await this.client.markMessageProcessed(message.chat_room_id, message.id);
-          continue;
-        }
-
-        // Skip non-text messages
-        if (message.message_type !== "text") {
-          await this.client.markMessageProcessed(message.chat_room_id, message.id);
-          continue;
-        }
-
-        // Process the backlog message
-        await this.processBacklogMessage(message);
-        processedCount++;
+        console.log(`[thenvoi] Room ${roomId}: synced ${roomProcessedCount} messages`);
+        totalProcessedCount += roomProcessedCount;
       }
 
-      this.callbacks.onSyncCompleted?.(processedCount);
+      // After sync completes, process any WS messages that arrived during sync
+      // (like Python SDK's approach of processing queued messages after sync)
+      const pendingCount = await this.processPendingWsMessages();
+      totalProcessedCount += pendingCount;
+
+      // Clear sync state (like Python SDK clears marker and dedupe cache after sync)
+      this.syncPointMessageId = null;
+      // Note: We keep processedMessageIds for ongoing deduplication
+
+      this.callbacks.onSyncCompleted?.(totalProcessedCount);
     } catch (error) {
       this.callbacks.onSyncError?.(error as Error);
       throw error;
     } finally {
       this.isSynchronizing = false;
+      // Clear any remaining pending messages on error
+      this.pendingWsMessages = [];
+    }
+  }
+
+  /**
+   * Process WebSocket messages that were queued during sync.
+   * These messages arrived via WS while we were syncing via REST.
+   * They may or may not have been processed via REST (dedupe check handles this).
+   */
+  private async processPendingWsMessages(): Promise<number> {
+    const pendingMessages = [...this.pendingWsMessages];
+    this.pendingWsMessages = [];
+
+    if (pendingMessages.length === 0) {
+      return 0;
+    }
+
+    console.log(`[thenvoi] Processing ${pendingMessages.length} queued WS messages after sync`);
+
+    let processedCount = 0;
+    for (const { roomId, payload } of pendingMessages) {
+      // Skip if already processed during sync (via REST)
+      if (this.processedMessageIds.has(payload.id)) {
+        console.log(`[thenvoi] Skipping queued message ${payload.id} (already processed via REST)`);
+        continue;
+      }
+
+      // Skip own messages
+      if (payload.sender_id === this.config.agentId) {
+        console.log(`[thenvoi] Skipping queued own message ${payload.id}`);
+        try {
+          await this.client.markMessageProcessing(roomId, payload.id);
+          await this.client.markMessageProcessed(roomId, payload.id);
+        } catch {
+          // Ignore errors
+        }
+        continue;
+      }
+
+      // Skip non-text messages
+      if (payload.message_type !== "text") {
+        console.log(`[thenvoi] Skipping queued non-text message ${payload.id}`);
+        try {
+          await this.client.markMessageProcessing(roomId, payload.id);
+          await this.client.markMessageProcessed(roomId, payload.id);
+        } catch {
+          // Ignore errors
+        }
+        continue;
+      }
+
+      // Process the message
+      try {
+        await this.processWsMessage(roomId, payload);
+        processedCount++;
+      } catch (error) {
+        console.error(`[thenvoi] Error processing queued message ${payload.id}:`, error);
+      }
+    }
+
+    console.log(`[thenvoi] Processed ${processedCount} queued WS messages`);
+    return processedCount;
+  }
+
+  /**
+   * Process a WebSocket message (either live or from pending queue).
+   * Extracted from handleMessageCreated to be reusable.
+   */
+  private async processWsMessage(roomId: string, payload: MessageCreatedPayload): Promise<void> {
+    // Update room state
+    const room = this.rooms.get(roomId);
+    if (room) {
+      room.lastMessageId = payload.id;
+    }
+
+    // Mark as processing
+    try {
+      await this.client.markMessageProcessing(roomId, payload.id);
+    } catch {
+      console.log(`[thenvoi] Note: could not mark message ${payload.id} as processing`);
+    }
+
+    try {
+      // Look up sender name from room participants
+      const roomState = this.rooms.get(roomId);
+      const participant = roomState?.participants.find(p => p.id === payload.sender_id);
+      const senderName = participant?.name ?? payload.sender_type ?? "Unknown";
+
+      console.log(`[thenvoi] Sender lookup: sender_id=${payload.sender_id}, participants=${roomState?.participants.length ?? 0}, found=${participant?.name ?? 'none'}, using=${senderName}`);
+
+      const message: OpenClawInboundMessage = {
+        channelId: "thenvoi",
+        threadId: roomId,
+        senderId: payload.sender_id,
+        senderType: payload.sender_type,
+        senderName,
+        text: payload.content,
+        timestamp: payload.inserted_at,
+        metadata: {
+          messageId: payload.id,
+          mentions: payload.metadata?.mentions,
+        },
+      };
+
+      // Deliver to OpenClaw
+      this.callbacks.onMessage(message);
+
+      // Mark as processed
+      await this.client.markMessageProcessed(roomId, payload.id);
+      this.processedMessageIds.add(payload.id);
+
+      console.log(`[thenvoi] Message ${payload.id} delivered and marked as processed`);
+    } catch (error) {
+      // Mark as failed
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[thenvoi] Error processing message ${payload.id}:`, errorMessage);
+      try {
+        await this.client.markMessageFailed(roomId, payload.id, errorMessage);
+      } catch {
+        // Ignore errors marking as failed
+      }
+      throw error;
     }
   }
 
@@ -490,10 +663,8 @@ export class ThenvoiRuntime {
       throw new ThenvoiConnectionError("Socket not connected");
     }
 
-    const topic = `agent:rooms`;
-    this.agentChannel = this.socket.channel(topic, {
-      agent_id: this.config.agentId,
-    });
+    const topic = `agent_rooms:${this.config.agentId}`;
+    this.agentChannel = this.socket.channel(topic, {});
 
     // Room lifecycle events
     this.agentChannel.on("room_added", (payload) => {
@@ -518,6 +689,53 @@ export class ThenvoiRuntime {
           reject(new ThenvoiConnectionError("Timeout joining agent channel"));
         });
     });
+  }
+
+  /**
+   * Fetch existing rooms from the API and join them.
+   */
+  private async joinExistingRooms(): Promise<void> {
+    try {
+      const response = await this.client.listChats();
+      // Handle both { chats: [...] } and { data: [...] } response formats
+      const chats = response.chats ?? (response as unknown as { data: Array<{ id: string; title: string }> }).data ?? [];
+
+      console.log(`[thenvoi] Found ${chats.length} existing rooms`);
+
+      for (const chat of chats) {
+        // Fetch participants for the room
+        let participants: Participant[] = [];
+        try {
+          participants = await this.client.getParticipants(chat.id);
+          console.log(`[thenvoi] Room ${chat.id}: loaded ${participants.length} participants: ${participants.map(p => p.name).join(', ')}`);
+        } catch (error) {
+          // Continue without participants - they'll be updated via events
+          console.warn(`[thenvoi] Room ${chat.id}: failed to load participants:`, error);
+        }
+
+        // Initialize room state with participants
+        this.rooms.set(chat.id, {
+          roomId: chat.id,
+          title: chat.title,
+          participants,
+          joinedAt: new Date(),
+        });
+
+        // Join room channels
+        try {
+          await this.joinRoomChannels(chat.id);
+          this.callbacks.onRoomJoined?.(chat.id, chat.title);
+        } catch (error) {
+          this.callbacks.onError?.(error as Error);
+          this.rooms.delete(chat.id);
+        }
+      }
+    } catch (error) {
+      // Log but don't fail - rooms can still be joined via room_added events
+      this.callbacks.onError?.(
+        new ThenvoiConnectionError(`Failed to fetch existing rooms: ${error}`),
+      );
+    }
   }
 
   private async joinRoomChannels(roomId: string): Promise<void> {
@@ -611,7 +829,10 @@ export class ThenvoiRuntime {
         break;
 
       case "message_created":
-        this.handleMessageCreated(event.roomId, event.payload);
+        // Handle async message processing without blocking the event loop
+        this.handleMessageCreated(event.roomId, event.payload).catch((error) => {
+          this.callbacks.onError?.(error as Error);
+        });
         break;
 
       case "participant_added":
@@ -657,60 +878,63 @@ export class ThenvoiRuntime {
     this.callbacks.onRoomLeft?.(roomId);
   }
 
-  private handleMessageCreated(
+  private async handleMessageCreated(
     roomId: string,
     payload: MessageCreatedPayload,
-  ): void {
+  ): Promise<void> {
+    // Debug: log raw payload to understand structure
+    console.log("[thenvoi] Raw message payload:", JSON.stringify(payload, null, 2));
+
     // Record sync point on first WebSocket message
     if (this.syncPointMessageId === null) {
       this.syncPointMessageId = payload.id;
+      console.log(`[thenvoi] Sync point set to message ${payload.id}`);
     }
 
-    // Skip our own messages
+    // Skip our own messages (must call processing before processed per API spec)
     if (payload.sender_id === this.config.agentId) {
+      console.log(`[thenvoi] Skipping own message ${payload.id}`);
+      try {
+        await this.client.markMessageProcessing(roomId, payload.id);
+        await this.client.markMessageProcessed(roomId, payload.id);
+      } catch {
+        // Ignore errors - message may already be processed
+      }
       return;
     }
 
-    // Skip non-text messages (tool_call, tool_result, etc.)
+    // Skip non-text messages (must call processing before processed per API spec)
     if (payload.message_type !== "text") {
+      console.log(`[thenvoi] Skipping non-text message ${payload.id} (type: ${payload.message_type})`);
+      try {
+        await this.client.markMessageProcessing(roomId, payload.id);
+        await this.client.markMessageProcessed(roomId, payload.id);
+      } catch {
+        // Ignore errors - message may already be processed
+      }
       return;
     }
 
     // Skip if already processed (deduplication during sync)
     if (this.processedMessageIds.has(payload.id)) {
+      console.log(`[thenvoi] Skipping already processed message ${payload.id}`);
       return;
     }
 
-    // If synchronizing, skip - messages will be processed via REST
+    // If synchronizing, queue the message for processing after sync completes
+    // (like Python SDK does - don't skip, just defer)
     if (this.isSynchronizing) {
+      console.log(`[thenvoi] Queueing message ${payload.id} during sync (will process after sync)`);
+      this.pendingWsMessages.push({ roomId, payload });
       return;
     }
 
-    // Update room state
-    const room = this.rooms.get(roomId);
-    if (room) {
-      room.lastMessageId = payload.id;
+    // Process the message using the shared method
+    try {
+      await this.processWsMessage(roomId, payload);
+    } catch (error) {
+      // Error already logged in processWsMessage
     }
-
-    // Mark as processed
-    this.processedMessageIds.add(payload.id);
-
-    // Convert to OpenClaw format and deliver
-    const message: OpenClawInboundMessage = {
-      channelId: "thenvoi",
-      threadId: roomId,
-      senderId: payload.sender_id,
-      senderType: payload.sender_type,
-      senderName: payload.sender_name,
-      text: payload.content,
-      timestamp: payload.inserted_at,
-      metadata: {
-        messageId: payload.id,
-        mentions: payload.metadata?.mentions,
-      },
-    };
-
-    this.callbacks.onMessage(message);
   }
 
   private handleParticipantAdded(

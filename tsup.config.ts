@@ -8,5 +8,7 @@ export default defineConfig({
   clean: true,
   target: "node22",
   outDir: "dist",
-  external: ["phoenix", "openclaw"],
+  // Bundle phoenix into plugin, keep openclaw and ws external (provided by host)
+  external: ["openclaw", "ws"],
+  noExternal: ["phoenix"],
 });

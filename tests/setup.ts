@@ -17,6 +17,7 @@ beforeEach(() => {
   // Reset environment variables
   delete process.env.THENVOI_API_KEY;
   delete process.env.THENVOI_AGENT_ID;
+  delete process.env.THENVOI_API_KEY_USER;
   delete process.env.THENVOI_WS_URL;
   delete process.env.THENVOI_REST_URL;
 });

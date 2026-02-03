@@ -13,6 +13,7 @@ import type {
   LookupPeersParams,
   RemoveParticipantParams,
   SendEventParams,
+  SendMessageParams,
 } from "./types.js";
 
 // =============================================================================
@@ -216,7 +217,7 @@ const getParticipantsTool: McpTool = {
 // Tool: thenvoi_create_chatroom
 // =============================================================================
 
-const createChatroomTool: McpTool = {
+const createChatTool: McpTool = {
   name: "thenvoi_create_chatroom",
   description:
     "Create a new Thenvoi chat room for collaboration. " +
@@ -238,7 +239,7 @@ const createChatroomTool: McpTool = {
       throw new Error("Thenvoi client not connected");
     }
 
-    const response = await client.createChatroom(task_id);
+    const response = await client.createChat(task_id);
 
     return {
       success: true,
@@ -255,9 +256,13 @@ const createChatroomTool: McpTool = {
 const sendEventTool: McpTool = {
   name: "thenvoi_send_event",
   description:
-    "Share your thinking process, errors, or task progress with other participants. " +
-    "Use message_type='thought' to share reasoning, 'error' for problems, 'task' for progress updates. " +
-    "IMPORTANT: You MUST call this BEFORE every action to show your reasoning process.",
+    "Share events with other participants in a Thenvoi chat room. " +
+    "Event types: " +
+    "'thought' - share your reasoning process (shows thinking indicator), " +
+    "'error' - report problems or failures (shows error indicator), " +
+    "'task' - report progress or status updates (shows progress indicator), " +
+    "'tool_call' - report tool invocation (shows tool execution, include metadata with tool_call_id, name, args), " +
+    "'tool_result' - report tool completion (shows tool result, include metadata with tool_call_id, name, output).",
   inputSchema: {
     type: "object",
     properties: {
@@ -267,30 +272,105 @@ const sendEventTool: McpTool = {
       },
       content: {
         type: "string",
-        description: "The content of the event (your thinking, error message, or task status)",
+        description: "Human-readable content of the event",
       },
       message_type: {
         type: "string",
-        description: "Type of event: 'thought' for reasoning, 'error' for problems, 'task' for progress",
-        enum: ["thought", "error", "task"],
+        description: "Type of event",
+        enum: ["thought", "error", "task", "tool_call", "tool_result"],
+      },
+      metadata: {
+        type: "object",
+        description:
+          "Optional structured metadata. For tool_call: {tool_call_id, name, args}. " +
+          "For tool_result: {tool_call_id, name, output, error?}",
       },
     },
     required: ["room_id", "content", "message_type"],
   },
   handler: async (params: unknown) => {
-    const { room_id, content, message_type } = params as SendEventParams;
+    const { room_id, content, message_type, metadata } = params as SendEventParams;
     const client = getClient();
 
     if (!client) {
       throw new Error("Thenvoi client not connected");
     }
 
-    // Send as a message with the specified type (no mentions needed for events)
-    await client.sendMessage(room_id, content, [], message_type);
+    // Send event with optional metadata
+    const response = await client.sendEvent(room_id, content, message_type, metadata);
 
     return {
       success: true,
+      event_id: response.id,
       message_type,
+    };
+  },
+};
+
+// =============================================================================
+// Tool: thenvoi_send_message
+// =============================================================================
+
+const sendMessageTool: McpTool = {
+  name: "thenvoi_send_message",
+  description:
+    "Send a message to a Thenvoi chat room. " +
+    "Messages require at least one @mention. Use this to respond to users or other agents. " +
+    "IMPORTANT: You MUST use this tool to communicate - plain text responses won't reach users.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      room_id: {
+        type: "string",
+        description: "The ID of the room to send the message to (use the thread_id from the conversation)",
+      },
+      content: {
+        type: "string",
+        description: "The message content to send",
+      },
+      mentions: {
+        type: "array",
+        description:
+          "List of participant names to @mention. At least one required. " +
+          "Use thenvoi_get_participants to see available participants.",
+      },
+    },
+    required: ["room_id", "content", "mentions"],
+  },
+  handler: async (params: unknown) => {
+    const { room_id, content, mentions } = params as SendMessageParams;
+    const client = getClient();
+
+    if (!client) {
+      throw new Error("Thenvoi client not connected");
+    }
+
+    if (!mentions || mentions.length === 0) {
+      throw new Error("At least one mention is required to send a message");
+    }
+
+    // Get participants to resolve names to IDs
+    const participants = await client.getParticipants(room_id);
+
+    // Resolve mention names to participant objects
+    const resolvedMentions = mentions.map((name) => {
+      const participant = participants.find(
+        (p) => p.name.toLowerCase() === name.toLowerCase()
+      );
+      if (!participant) {
+        throw new Error(
+          `Participant "${name}" not found in room. Use thenvoi_get_participants to see available participants.`
+        );
+      }
+      return { id: participant.id, name: participant.name };
+    });
+
+    const response = await client.sendMessage(room_id, content, resolvedMentions);
+
+    return {
+      success: true,
+      message_id: response.id,
+      recipients: response.recipients,
     };
   },
 };
@@ -304,8 +384,9 @@ export const mcpTools: McpTool[] = [
   addParticipantTool,
   removeParticipantTool,
   getParticipantsTool,
-  createChatroomTool,
+  createChatTool,
   sendEventTool,
+  sendMessageTool,
 ];
 
 /**

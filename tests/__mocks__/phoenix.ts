@@ -4,6 +4,27 @@
 
 type EventCallback = (payload: unknown) => void;
 
+// Global configuration for all new Socket instances
+let globalConnectShouldFail = false;
+let globalConnectError: unknown = undefined;
+
+/**
+ * Set global connect behavior for all new Socket instances.
+ * Useful for testing reconnection logic where new sockets are created.
+ */
+export function setGlobalConnectBehavior(shouldFail: boolean, error?: unknown): void {
+  globalConnectShouldFail = shouldFail;
+  globalConnectError = error;
+}
+
+/**
+ * Reset global connect behavior to default (success).
+ */
+export function resetGlobalConnectBehavior(): void {
+  globalConnectShouldFail = false;
+  globalConnectError = undefined;
+}
+
 interface MockPush {
   receive: (status: string, callback: (response?: unknown) => void) => MockPush;
 }
@@ -89,7 +110,11 @@ export class Socket {
   constructor(
     _endPoint: string,
     _opts?: { params?: Record<string, unknown> },
-  ) {}
+  ) {
+    // Apply global settings to new instances
+    this.shouldFailConnect = globalConnectShouldFail;
+    this.connectError = globalConnectError;
+  }
 
   /**
    * Configure connection behavior for testing.

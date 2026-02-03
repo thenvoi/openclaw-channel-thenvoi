@@ -9,6 +9,7 @@
 export interface ThenvoiConfig {
   apiKey: string;
   agentId: string;
+  userId: string;
   wsUrl: string;
   restUrl: string;
 }
@@ -17,6 +18,7 @@ export interface ThenvoiAccountConfig {
   enabled?: boolean;
   apiKey?: string;
   agentId?: string;
+  userId?: string;
   wsUrl?: string;
   restUrl?: string;
 }
@@ -49,6 +51,15 @@ export interface Mention {
   id: string;
   name: string;
   type: "User" | "Agent";
+}
+
+/**
+ * Mention format for API requests.
+ * Only requires id and name (without type).
+ */
+export interface MentionRequest {
+  id: string;
+  name: string;
 }
 
 export interface MessageCreatedPayload {
@@ -169,7 +180,16 @@ export interface SendMessageRequest {
 
 export interface SendMessageResponse {
   id: string;
-  status: string;
+  chat_room_id: string;
+  recipients: Array<{ id: string; name: string }>;
+  success: boolean;
+}
+
+export interface SendEventResponse {
+  id: string;
+  chat_room_id: string;
+  message_type: string;
+  success: boolean;
 }
 
 export interface AddParticipantRequest {
@@ -190,7 +210,10 @@ export interface CreateChatroomRequest {
 
 export interface CreateChatroomResponse {
   id: string;
-  status: string;
+  inserted_at: string;
+  updated_at: string;
+  task_id?: string;
+  title?: string;
 }
 
 // =============================================================================
@@ -254,10 +277,51 @@ export interface CreateChatroomParams {
   task_id?: string;
 }
 
+/**
+ * Event message types for UI status indicators.
+ * - thought: Agent's reasoning process (shows thinking indicator)
+ * - error: Error or problem report (shows error indicator)
+ * - task: Progress or status update (shows progress indicator)
+ * - tool_call: Tool invocation with args (shows tool execution)
+ * - tool_result: Tool execution result (shows tool completion)
+ */
+export type EventMessageType = "thought" | "error" | "task" | "tool_call" | "tool_result";
+
+/**
+ * Metadata for tool_call events.
+ */
+export interface ToolCallMetadata {
+  tool_call_id: string;
+  name: string;
+  args?: Record<string, unknown>;
+}
+
+/**
+ * Metadata for tool_result events.
+ */
+export interface ToolResultMetadata {
+  tool_call_id: string;
+  name: string;
+  output?: string;
+  error?: string;
+}
+
+/**
+ * Generic event metadata - can be tool_call, tool_result, or custom data.
+ */
+export type EventMetadata = ToolCallMetadata | ToolResultMetadata | Record<string, unknown>;
+
 export interface SendEventParams {
   room_id: string;
   content: string;
-  message_type: "thought" | "error" | "task";
+  message_type: EventMessageType;
+  metadata?: EventMetadata;
+}
+
+export interface SendMessageParams {
+  room_id: string;
+  content: string;
+  mentions: string[];
 }
 
 // =============================================================================

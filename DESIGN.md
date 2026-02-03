@@ -290,7 +290,7 @@ The plugin MUST skip messages sent by itself:
 ```typescript
 function handleMessageCreated(payload: MessageCreatedPayload): void {
   // Skip messages from self
-  if (payload.sender_type === 'Agent' && payload.sender_id === this.agentId) {
+  if (payload.sender_type === 'Agent' && payload.sender_id === this.userId) {
     console.debug(`[thenvoi] Skipping own message ${payload.id}`);
     return;
   }
@@ -372,14 +372,15 @@ Pi: "I've invited StatisticsBot to our conversation. They should join shortly."
 
 ## Configuration
 
-### Environment Variables
+Configuration is provided via **`openclaw.yaml`** with optional environment variable fallback.
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `THENVOI_API_KEY` | Yes | - | API key for authentication |
-| `THENVOI_AGENT_ID` | Yes | - | Agent identifier on Thenvoi |
-| `THENVOI_WS_URL` | No | `wss://api.thenvoi.com/ws` | WebSocket endpoint |
-| `THENVOI_REST_URL` | No | `https://api.thenvoi.com` | REST API endpoint |
+| Setting | Env Fallback | Default | Description |
+|---------|--------------|---------|-------------|
+| `apiKey` | `THENVOI_API_KEY` | - | API key for authentication |
+| `agentId` | `THENVOI_AGENT_ID` | - | Agent identifier on Thenvoi |
+| `userId` | `THENVOI_API_KEY_USER` | - | User identifier on Thenvoi |
+| `wsUrl` | `THENVOI_WS_URL` | `wss://api.thenvoi.com/ws` | WebSocket endpoint |
+| `restUrl` | `THENVOI_REST_URL` | `https://api.thenvoi.com` | REST API endpoint |
 
 ### OpenClaw Configuration
 
@@ -392,9 +393,13 @@ channels:
         enabled: true
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
-        wsUrl: ${THENVOI_WS_URL}
-        restUrl: ${THENVOI_REST_URL}
+        userId: ${THENVOI_API_KEY_USER}
+        # Optional: custom endpoints
+        # wsUrl: wss://api.thenvoi.com/ws
+        # restUrl: https://api.thenvoi.com
 ```
+
+**Note:** The demo environment uses `demo/.env.example` for credentials.
 
 ## Example: Connecting an OpenClaw Agent to Thenvoi
 
@@ -409,12 +414,14 @@ npm install @thenvoi/openclaw-channel-thenvoi
 # Or add to your openclaw.yaml plugins section
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure Credentials
+
+Set your Thenvoi credentials as environment variables or directly in `openclaw.yaml`:
 
 ```bash
-# .env
-THENVOI_API_KEY=tv_your_api_key_here
-THENVOI_AGENT_ID=your-agent-uuid
+export THENVOI_API_KEY=tv_your_api_key_here
+export THENVOI_AGENT_ID=your-agent-uuid
+export THENVOI_API_KEY_USER=your-user-uuid
 ```
 
 ### 3. Configure OpenClaw
@@ -435,6 +442,7 @@ channels:
         enabled: true
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
+        userId: ${THENVOI_API_KEY_USER}
         wsUrl: wss://api.thenvoi.com/ws
         restUrl: https://api.thenvoi.com
 ```
@@ -699,33 +707,33 @@ openclaw-channel-thenvoi/
 ## Implementation Phases
 
 ### Phase 1: Basic Channel (MVP)
-- [ ] Phoenix Channels WebSocket connection
-- [ ] Single room message receive/send
-- [ ] Self-message filtering (skip own messages)
-- [ ] Basic channel registration with OpenClaw
+- [x] Phoenix Channels WebSocket connection
+- [x] Single room message receive/send
+- [x] Self-message filtering (skip own messages)
+- [x] Basic channel registration with OpenClaw
 
 ### Phase 2: Multi-Room Support
-- [ ] Dynamic room subscription (join/leave)
-- [ ] Room state management
-- [ ] Thread routing in OpenClaw
-- [ ] Bootstrap existing rooms on startup (`list_agent_chats`)
+- [x] Dynamic room subscription (join/leave)
+- [x] Room state management
+- [x] Thread routing in OpenClaw
+- [x] Bootstrap existing rooms on startup (`list_agent_chats`)
 
 ### Phase 3: MCP Tools
-- [ ] lookup_peers tool
-- [ ] add_participant / remove_participant tools
-- [ ] get_participants tool
-- [ ] create_chatroom tool
-- [ ] send_event tool (for thoughts/errors)
+- [x] lookup_peers tool
+- [x] add_participant / remove_participant tools
+- [x] get_participants tool
+- [x] create_chatroom tool
+- [x] send_event tool (for thoughts/errors)
 
 ### Phase 4: Message Recovery
-- [ ] `/next` endpoint for backlog messages
-- [ ] Sync point pattern implementation
-- [ ] Message status tracking (processing/processed/failed)
-- [ ] Deduplication during sync
+- [x] `/next` endpoint for backlog messages
+- [x] Sync point pattern implementation
+- [x] Message status tracking (processing/processed/failed)
+- [x] Deduplication during sync
 
 ### Phase 5: Production Hardening
-- [ ] Reconnection handling with state recovery
-- [ ] Error recovery and retry logic
+- [x] Reconnection handling with state recovery
+- [x] Error recovery and retry logic
 - [ ] Message delivery confirmation
 - [ ] Rate limiting
 
@@ -750,7 +758,7 @@ describe("ThenvoiClient", () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => ({ id: "msg-1" }) });
     global.fetch = mockFetch;
 
-    const client = new ThenvoiClient({ apiKey: "test", agentId: "agent-1", ... });
+    const client = new ThenvoiClient({ apiKey: "test", agentId: "agent-1", userId: "user-1", ... });
     await client.sendMessage("room-1", "Hello", ["User"]);
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -891,7 +899,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       THENVOI_API_KEY: ${{ secrets.THENVOI_API_KEY }}
-      THENVOI_AGENT_ID: ${{ secrets.THENVOI_AGENT_ID }}
+      THENVOI_API_KEY_USER: ${{ secrets.THENVOI_API_KEY_USER }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

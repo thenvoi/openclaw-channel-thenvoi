@@ -38,13 +38,19 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build"
+    "test:e2e": "node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.config.e2e.ts",
+    "prepublishOnly": "npm run build",
+    "deploy:demo": "npm run build && cp dist/index.js dist/index.js.map dist/index.d.ts demo/plugins/thenvoi/",
+    "demo:restart": "npm run deploy:demo && cd demo && docker compose down && docker compose up -d",
+    "demo:logs": "cd demo && docker compose logs -f"
   },
   "dependencies": {
-    "phoenix": "^1.7.14"
+    "phoenix": "^1.7.14",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "tsup": "^8.0.0",

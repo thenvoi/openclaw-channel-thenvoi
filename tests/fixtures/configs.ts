@@ -14,6 +14,7 @@ import type {
 export const mockThenvoiConfig: ThenvoiConfig = {
   apiKey: "test-api-key-12345",
   agentId: "agent-123",
+  userId: "user-456",
   wsUrl: "wss://test.thenvoi.com/ws",
   restUrl: "https://test.thenvoi.com",
 };
@@ -22,13 +23,14 @@ export const mockAccountConfig: ThenvoiAccountConfig = {
   enabled: true,
   apiKey: "test-api-key-12345",
   agentId: "agent-123",
+  userId: "user-456",
   wsUrl: "wss://test.thenvoi.com/ws",
   restUrl: "https://test.thenvoi.com",
 };
 
 export const mockMinimalAccountConfig: ThenvoiAccountConfig = {
   enabled: true,
-  // Uses environment variables for apiKey, agentId, wsUrl, restUrl
+  // Uses environment variables for apiKey, agentId, userId, wsUrl, restUrl
 };
 
 // =============================================================================
@@ -44,6 +46,7 @@ export const mockPluginConfig = {
           enabled: true,
           apiKey: "secondary-api-key",
           agentId: "agent-456",
+          userId: "user-789",
         },
       },
     },

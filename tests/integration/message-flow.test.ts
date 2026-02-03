@@ -6,14 +6,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ThenvoiClient } from "../../src/thenvoi-client.js";
 import { createMockFetch, mockFetchOnce } from "../__mocks__/fetch.js";
 import { mockThenvoiConfig } from "../fixtures/configs.js";
-import {
-  mockSendMessageResponse,
-  mockNextMessageResponse,
-} from "../fixtures/payloads.js";
+import { mockNextMessageResponse } from "../fixtures/payloads.js";
 
 describe("Message Flow Integration", () => {
   let client: ThenvoiClient;
   let fetchMock: ReturnType<typeof createMockFetch>;
+
+  const mockSendResponse = {
+    id: "msg-new-001",
+    chat_room_id: "room-001",
+    recipients: [{ id: "user-1", name: "User" }],
+    success: true,
+  };
 
   beforeEach(() => {
     fetchMock = createMockFetch({ response: {} });
@@ -23,16 +27,14 @@ describe("Message Flow Integration", () => {
 
   describe("Send and receive message flow", () => {
     it("should send a message successfully", async () => {
-      mockFetchOnce(fetchMock, { response: mockSendMessageResponse });
+      mockFetchOnce(fetchMock, { response: { data: mockSendResponse } });
 
-      const result = await client.sendMessage(
-        "room-001",
-        "Hello, world!",
-        ["User"],
-      );
+      const result = await client.sendMessage("room-001", "Hello, world!", [
+        { id: "user-1", name: "User" },
+      ]);
 
       expect(result.id).toBe("msg-new-001");
-      expect(result.status).toBe("sent");
+      expect(result.success).toBe(true);
     });
 
     it("should process backlog messages", async () => {
@@ -83,13 +85,19 @@ describe("Message Flow Integration", () => {
     it("should handle multiple concurrent API calls", async () => {
       // Set up responses for all calls
       for (let i = 0; i < 3; i++) {
-        mockFetchOnce(fetchMock, { response: mockSendMessageResponse });
+        mockFetchOnce(fetchMock, { response: { data: mockSendResponse } });
       }
 
       const results = await Promise.all([
-        client.sendMessage("room-001", "Message 1", ["User"]),
-        client.sendMessage("room-001", "Message 2", ["User"]),
-        client.sendMessage("room-001", "Message 3", ["User"]),
+        client.sendMessage("room-001", "Message 1", [
+          { id: "user-1", name: "User" },
+        ]),
+        client.sendMessage("room-001", "Message 2", [
+          { id: "user-1", name: "User" },
+        ]),
+        client.sendMessage("room-001", "Message 3", [
+          { id: "user-1", name: "User" },
+        ]),
       ]);
 
       expect(results).toHaveLength(3);

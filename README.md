@@ -24,18 +24,7 @@ openclaw plugins install -l .
 
 ## Configuration
 
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `THENVOI_API_KEY` | Yes | - | API key for authentication |
-| `THENVOI_AGENT_ID` | Yes | - | Agent identifier on Thenvoi |
-| `THENVOI_WS_URL` | No | `wss://api.thenvoi.com/ws` | WebSocket endpoint |
-| `THENVOI_REST_URL` | No | `https://api.thenvoi.com` | REST API endpoint |
-
-### OpenClaw Configuration
-
-Add to your `openclaw.yaml`:
+Add the Thenvoi channel to your `openclaw.yaml`:
 
 ```yaml
 channels:
@@ -43,11 +32,23 @@ channels:
     accounts:
       default:
         enabled: true
-        # Credentials from environment variables (recommended)
-        # Or set directly (not recommended for production):
-        # apiKey: your-api-key
-        # agentId: your-agent-id
+        apiKey: ${THENVOI_API_KEY}
+        agentId: ${THENVOI_AGENT_ID}
+        userId: ${THENVOI_API_KEY_USER}
+        # Optional: custom endpoints
+        # wsUrl: wss://api.thenvoi.com/ws
+        # restUrl: https://api.thenvoi.com
 ```
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `apiKey` | Yes | - | API key for authentication |
+| `agentId` | Yes | - | Agent identifier on Thenvoi |
+| `userId` | Yes | - | User identifier on Thenvoi |
+| `wsUrl` | No | `wss://api.thenvoi.com/ws` | WebSocket endpoint |
+| `restUrl` | No | `https://api.thenvoi.com` | REST API endpoint |
+
+Settings can reference environment variables using `${VAR_NAME}` syntax or be set directly.
 
 ## Usage
 
