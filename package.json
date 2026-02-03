@@ -29,7 +29,7 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && cp openclaw.plugin.json dist/",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
@@ -64,5 +64,10 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
   }
 }
