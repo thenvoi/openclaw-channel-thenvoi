@@ -101,7 +101,6 @@ export class ThenvoiRuntime {
     this.intentionalDisconnect = false;
 
     return new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.socket = new Socket(this.config.wsUrl, {
         params: {
           api_key: this.config.apiKey,
@@ -251,7 +250,7 @@ export class ThenvoiRuntime {
     this.reconnectTimer = setTimeout(async () => {
       try {
         await this.performReconnection();
-      } catch (error) {
+      } catch (_error) {
         // Schedule another attempt
         this.handleReconnection();
       }
@@ -273,7 +272,6 @@ export class ThenvoiRuntime {
     this.pendingWsMessages = []; // Clear pending queue for fresh sync
 
     // Create new socket
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.socket = new Socket(this.config.wsUrl, {
       params: {
         api_key: this.config.apiKey,
@@ -306,7 +304,7 @@ export class ThenvoiRuntime {
         await this.joinRoomChannels(roomId);
         // Restore room state
         this.rooms.set(roomId, roomState);
-      } catch (error) {
+      } catch (_error) {
         // Room may no longer be accessible, remove from state
         this.rooms.delete(roomId);
         this.callbacks.onRoomLeft?.(roomId);
@@ -332,7 +330,7 @@ export class ThenvoiRuntime {
       try {
         const participants = await this.client.getParticipants(roomId);
         roomState.participants = participants;
-      } catch (error) {
+      } catch (_error) {
         // Log but don't fail - participants will be updated via events
       }
     }
@@ -932,7 +930,7 @@ export class ThenvoiRuntime {
     // Process the message using the shared method
     try {
       await this.processWsMessage(roomId, payload);
-    } catch (error) {
+    } catch (_error) {
       // Error already logged in processWsMessage
     }
   }
