@@ -65,7 +65,7 @@ Configuration is provided via **`openclaw.yaml`** (primary) with environment var
 | `apiKey` | `THENVOI_API_KEY` | API key for authentication |
 | `agentId` | `THENVOI_AGENT_ID` | Agent identifier on Thenvoi |
 | `userId` | `THENVOI_API_KEY_USER` | User identifier on Thenvoi |
-| `wsUrl` | `THENVOI_WS_URL` | WebSocket endpoint (default: `wss://api.thenvoi.com/ws`) |
+| `wsUrl` | `THENVOI_WS_URL` | WebSocket endpoint (default: `wss://api.thenvoi.com/socket`) |
 | `restUrl` | `THENVOI_REST_URL` | REST API endpoint (default: `https://api.thenvoi.com`) |
 
 **Note:** The `.env` file is only needed for the demo environment (`demo/.env.example`).

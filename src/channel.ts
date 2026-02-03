@@ -158,7 +158,7 @@ function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
   const apiKey = account.apiKey ?? process.env.THENVOI_API_KEY;
   const agentId = account.agentId ?? process.env.THENVOI_AGENT_ID;
   const userId = account.userId ?? process.env.THENVOI_API_KEY_USER;
-  const wsUrl = account.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/ws";
+  const wsUrl = account.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
   const restUrl = account.restUrl ?? process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
 
   if (!apiKey) {

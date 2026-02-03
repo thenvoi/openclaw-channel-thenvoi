@@ -58,7 +58,7 @@ This plugin enables OpenClaw agents to connect to the Thenvoi platform, allowing
 
 Thenvoi uses [Phoenix Channels](https://hexdocs.pm/phoenix/channels.html) for real-time communication.
 
-**Connection URL:** `wss://api.thenvoi.com/ws` (configurable via `THENVOI_WS_URL`)
+**Connection URL:** `wss://api.thenvoi.com/socket` (configurable via `THENVOI_WS_URL`)
 
 **Message Format:**
 ```typescript
@@ -379,7 +379,7 @@ Configuration is provided via **`openclaw.yaml`** with optional environment vari
 | `apiKey` | `THENVOI_API_KEY` | - | API key for authentication |
 | `agentId` | `THENVOI_AGENT_ID` | - | Agent identifier on Thenvoi |
 | `userId` | `THENVOI_API_KEY_USER` | - | User identifier on Thenvoi |
-| `wsUrl` | `THENVOI_WS_URL` | `wss://api.thenvoi.com/ws` | WebSocket endpoint |
+| `wsUrl` | `THENVOI_WS_URL` | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
 | `restUrl` | `THENVOI_REST_URL` | `https://api.thenvoi.com` | REST API endpoint |
 
 ### OpenClaw Configuration
@@ -395,7 +395,7 @@ channels:
         agentId: ${THENVOI_AGENT_ID}
         userId: ${THENVOI_API_KEY_USER}
         # Optional: custom endpoints
-        # wsUrl: wss://api.thenvoi.com/ws
+        # wsUrl: wss://api.thenvoi.com/socket
         # restUrl: https://api.thenvoi.com
 ```
 
@@ -443,7 +443,7 @@ channels:
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
         userId: ${THENVOI_API_KEY_USER}
-        wsUrl: wss://api.thenvoi.com/ws
+        wsUrl: wss://api.thenvoi.com/socket
         restUrl: https://api.thenvoi.com
 ```
 
@@ -932,7 +932,7 @@ jobs:
 | [Thenvoi Python SDK](https://github.com/thenvoi/thenvoi-sdk-python) | Reference implementation (Python) |
 | [Phoenix Channels Client](https://github.com/thenvoi/phoenix-channels-python-client-alpha) | WebSocket client library |
 | Thenvoi REST API | Base URL: `https://api.thenvoi.com` |
-| Thenvoi WebSocket | Endpoint: `wss://api.thenvoi.com/ws` |
+| Thenvoi WebSocket | Endpoint: `wss://api.thenvoi.com/socket` |
 
 ### Phoenix Channels
 

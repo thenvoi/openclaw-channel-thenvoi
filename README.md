@@ -36,7 +36,7 @@ channels:
         agentId: ${THENVOI_AGENT_ID}
         userId: ${THENVOI_API_KEY_USER}
         # Optional: custom endpoints
-        # wsUrl: wss://api.thenvoi.com/ws
+        # wsUrl: wss://api.thenvoi.com/socket
         # restUrl: https://api.thenvoi.com
 ```
 
@@ -45,7 +45,7 @@ channels:
 | `apiKey` | Yes | - | API key for authentication |
 | `agentId` | Yes | - | Agent identifier on Thenvoi |
 | `userId` | Yes | - | User identifier on Thenvoi |
-| `wsUrl` | No | `wss://api.thenvoi.com/ws` | WebSocket endpoint |
+| `wsUrl` | No | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
 | `restUrl` | No | `https://api.thenvoi.com` | REST API endpoint |
 
 Settings can reference environment variables using `${VAR_NAME}` syntax or be set directly.

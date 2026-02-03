@@ -25,7 +25,7 @@
  * - THENVOI_API_KEY_USER: User identifier on Thenvoi
  *
  * Optional environment variables:
- * - THENVOI_WS_URL: WebSocket endpoint (default: wss://api.thenvoi.com/ws)
+ * - THENVOI_WS_URL: WebSocket endpoint (default: wss://api.thenvoi.com/socket)
  * - THENVOI_REST_URL: REST API endpoint (default: https://api.thenvoi.com)
  *
  * @packageDocumentation

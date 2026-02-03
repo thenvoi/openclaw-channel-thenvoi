@@ -15,7 +15,7 @@ export const mockThenvoiConfig: ThenvoiConfig = {
   apiKey: "test-api-key-12345",
   agentId: "agent-123",
   userId: "user-456",
-  wsUrl: "wss://test.thenvoi.com/ws",
+  wsUrl: "wss://test.thenvoi.com/socket",
   restUrl: "https://test.thenvoi.com",
 };
 
@@ -24,7 +24,7 @@ export const mockAccountConfig: ThenvoiAccountConfig = {
   apiKey: "test-api-key-12345",
   agentId: "agent-123",
   userId: "user-456",
-  wsUrl: "wss://test.thenvoi.com/ws",
+  wsUrl: "wss://test.thenvoi.com/socket",
   restUrl: "https://test.thenvoi.com",
 };
 
