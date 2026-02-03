@@ -109,7 +109,7 @@ let openclawRuntime: any = null;
  * Create the Thenvoi connection service.
  * This service manages the WebSocket connection lifecycle.
  */
-function createThenvoiService(): PluginService {
+function createThenvoiService(pluginConfig?: Record<string, unknown>): PluginService {
   return {
     id: "thenvoi-connection",
 
@@ -117,9 +117,10 @@ function createThenvoiService(): PluginService {
       const logger = ctx.logger;
       logger.info("Starting Thenvoi connection service...");
 
-      // Read config from plugin config (openclaw.json) with env fallback
+      // Read config from plugin config (passed at registration) or ctx.config, with env fallback
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const accounts = (ctx.config as any)?.accounts;
+      const configSource = pluginConfig ?? ctx.config;
+      const accounts = (configSource as any)?.accounts;
       const defaultAccount = accounts?.default;
 
       const apiKey = defaultAccount?.apiKey ?? process.env.THENVOI_API_KEY;
@@ -349,8 +350,12 @@ export default function plugin(api: OpenClawPluginApi): void {
   }
 
   // Register the connection service for lifecycle management
+  // Pass the plugin config from api.pluginConfig (which contains plugins.entries.thenvoi.config)
   if (api.registerService) {
-    api.registerService(createThenvoiService());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pluginConfig = (api as any).pluginConfig ?? (api as any).config;
+    console.log("[thenvoi] Plugin config keys:", pluginConfig ? Object.keys(pluginConfig) : "none");
+    api.registerService(createThenvoiService(pluginConfig));
     console.log("[thenvoi] Plugin loaded, connection service registered");
   } else {
     // Fallback: auto-start if registerService is not available
