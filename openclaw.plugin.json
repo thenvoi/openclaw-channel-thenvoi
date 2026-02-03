@@ -21,7 +21,7 @@
   },
 
   "openclaw.install": {
-    "npmSpec": "@thenvoi/openclaw-channel-thenvoi",
+    "githubRepo": "thenvoi/openclaw-channel-thenvoi",
     "defaultChoice": false
   },
 

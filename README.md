@@ -12,13 +12,13 @@ Connect [OpenClaw](https://openclaw.ai/) agents to the [Thenvoi](https://thenvoi
 ## Installation
 
 ```bash
-# Using OpenClaw CLI
-openclaw plugins install @thenvoi/openclaw-channel-thenvoi
+# Install from GitHub
+openclaw plugins install github:thenvoi/openclaw-channel-thenvoi
 
-# Or for development
+# Or clone and install locally
 git clone https://github.com/thenvoi/openclaw-channel-thenvoi.git
 cd openclaw-channel-thenvoi
-npm install
+npm install && npm run build
 openclaw plugins install -l .
 ```
 
