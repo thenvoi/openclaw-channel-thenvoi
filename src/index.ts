@@ -117,14 +117,19 @@ function createThenvoiService(): PluginService {
       const logger = ctx.logger;
       logger.info("Starting Thenvoi connection service...");
 
-      const apiKey = process.env.THENVOI_API_KEY;
-      const agentId = process.env.THENVOI_AGENT_ID;
-      const userId = process.env.THENVOI_API_KEY_USER;
-      const wsUrl = process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
-      const restUrl = process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
+      // Read config from plugin config (openclaw.json) with env fallback
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const accounts = (ctx.config as any)?.accounts;
+      const defaultAccount = accounts?.default;
+
+      const apiKey = defaultAccount?.apiKey ?? process.env.THENVOI_API_KEY;
+      const agentId = defaultAccount?.agentId ?? process.env.THENVOI_AGENT_ID;
+      const userId = defaultAccount?.userId ?? process.env.THENVOI_API_KEY_USER;
+      const wsUrl = defaultAccount?.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
+      const restUrl = defaultAccount?.restUrl ?? process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
 
       if (!apiKey || !agentId || !userId) {
-        logger.warn("Skipping Thenvoi connection: missing required environment variables (THENVOI_API_KEY, THENVOI_AGENT_ID, THENVOI_API_KEY_USER)");
+        logger.warn("Skipping Thenvoi connection: missing credentials. Configure in openclaw.json plugins.entries.thenvoi.config.accounts.default or set THENVOI_API_KEY, THENVOI_AGENT_ID, THENVOI_API_KEY_USER environment variables");
         return;
       }
 
