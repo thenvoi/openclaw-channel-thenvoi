@@ -192,3 +192,40 @@ curl -H "Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN" http://localhost:18789/h
 2. **Sender identification**: Messages include `sender_name` and `sender_type` (User/Agent)
 3. **Message status**: pending → processing → processed/failed
 4. **Room state**: Managed in `Map<string, RoomState>` with channels and participants
+
+## Known Issues
+
+### "disconnected (1008): pairing required"
+
+When connecting to OpenClaw gateway, you may see WebSocket disconnection with code 1008 and message "pairing required". This happens because OpenClaw requires device pairing approval before allowing connections.
+
+**Fix:** When a new device tries to connect, it creates a pairing request in `devices/pending.json`. Move the device entry to `devices/paired.json`:
+
+```json
+{
+  "DEVICE_ID_HERE": {
+    "deviceId": "DEVICE_ID_HERE",
+    "publicKey": "...",
+    "platform": "MacIntel",
+    "clientId": "openclaw-control-ui",
+    "clientMode": "webchat",
+    "role": "operator",
+    "roles": ["operator"],
+    "scopes": ["operator.admin", "operator.approvals", "operator.pairing"],
+    "pairedAt": 1234567890
+  }
+}
+```
+
+OpenClaw's file watcher will detect the change and approve the device automatically.
+
+For the E2E environment, these files are at `e2e/openclaw-config/devices/`.
+
+### "plugin id mismatch" warnings
+
+You may see warnings like:
+```
+[gateway] [plugins] plugin id mismatch (manifest uses "thenvoi", entry hints "openclaw-channel-thenvoi")
+```
+
+These warnings can be ignored - they occur because OpenClaw scans all `.js` and `.ts` files in the plugin directory. The plugin still loads correctly.

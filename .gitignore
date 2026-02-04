@@ -32,3 +32,4 @@ coverage/
 # pnpm-lock.yaml
 
 openclaw
+e2e
