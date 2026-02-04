@@ -31,6 +31,7 @@ interface OpenClawChannel {
   setup?: SetupHelpers;
   gateway?: GatewayHelpers;
   threading?: ThreadingHelpers;
+  messaging?: MessagingHelpers;
 }
 
 interface ChannelMeta {
@@ -52,21 +53,27 @@ interface ChannelConfigHelpers {
   resolveAccount: (config: PluginConfig, accountId?: string) => ThenvoiAccountConfig;
 }
 
+interface OutboundContext {
+  cfg: unknown;
+  to: string;
+  text: string;
+  mediaUrl?: string;
+  threadId?: string | number | null;
+  accountId?: string | null;
+}
+
+interface OutboundDeliveryResult {
+  channel: string;
+  messageId: string;
+  chatId?: string;
+  roomId?: string;
+}
+
 interface OutboundAdapter {
   deliveryMode: "direct" | "queued";
-  sendText: (params: SendTextParams) => Promise<SendTextResult>;
-}
-
-interface SendTextParams {
-  text: string;
-  threadId?: string;
-  accountId?: string;
-  mentions?: string[];
-}
-
-interface SendTextResult {
-  ok: boolean;
-  error?: string;
+  resolveTarget?: (params: { to?: string; allowFrom?: string[]; mode?: string }) => { ok: true; to: string } | { ok: false; error: Error };
+  sendText: (ctx: OutboundContext) => Promise<OutboundDeliveryResult>;
+  sendMedia: (ctx: OutboundContext) => Promise<OutboundDeliveryResult>;
 }
 
 interface SetupHelpers {
@@ -78,14 +85,29 @@ interface ValidationResult {
   errors?: string[];
 }
 
+interface GatewayContext {
+  cfg: unknown;
+  accountId: string;
+  account: ThenvoiAccountConfig;
+  abortSignal: AbortSignal;
+}
+
 interface GatewayHelpers {
-  start: (accountId: string, config: ThenvoiAccountConfig) => Promise<void>;
-  stop: (accountId: string) => Promise<void>;
+  startAccount: (ctx: GatewayContext) => Promise<void>;
+  stopAccount: (ctx: GatewayContext) => Promise<void>;
 }
 
 interface ThreadingHelpers {
   extractThreadId: (message: OpenClawInboundMessage) => string;
   formatThreadContext?: (threadId: string) => string;
+}
+
+interface MessagingHelpers {
+  normalizeTarget?: (raw: string) => string | undefined;
+  targetResolver?: {
+    looksLikeId?: (raw: string, normalized?: string) => boolean;
+    hint?: string;
+  };
 }
 
 interface PluginConfig {
@@ -216,68 +238,121 @@ export const thenvoiChannel: OpenClawChannel = {
   outbound: {
     deliveryMode: "direct",
 
-    sendText: async (params: SendTextParams): Promise<SendTextResult> => {
-      const { text, threadId, accountId } = params;
+    resolveTarget: (params: { to?: string; allowFrom?: string[]; mode?: string }) => {
+      console.log("[thenvoi] resolveTarget called with:", JSON.stringify(params));
+      const target = params.to?.trim() ?? "";
+      if (!target) {
+        console.log("[thenvoi] resolveTarget: no target provided");
+        return { ok: false, error: new Error("Thenvoi requires a room_id as target") };
+      }
+      console.log("[thenvoi] resolveTarget: accepting target:", target);
+      return { ok: true, to: target };
+    },
 
-      if (!threadId) {
-        return { ok: false, error: "threadId (room_id) is required" };
+    sendText: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
+      const { text, to, accountId } = ctx;
+      // In Thenvoi, the target "to" is the room_id
+      const roomId = to;
+
+      console.log("[thenvoi] sendText called with:", JSON.stringify({ to, text: text.substring(0, 50), accountId }));
+
+      if (!roomId) {
+        throw new Error("room_id is required");
       }
 
       const client = clients.get(accountId ?? "default");
       if (!client) {
-        return { ok: false, error: "Thenvoi client not initialized" };
+        throw new Error("Thenvoi client not initialized");
       }
 
-      try {
-        // Convert mention names to MentionRequest objects
-        const mentionNames = params.mentions ?? [];
-        let mentions: MentionRequest[] = [];
+      // Get participants for the room (needed for mention resolution and fallback)
+      const participants = await client.getParticipants(roomId);
+      const agent = await client.getAgentMe();
 
-        // Get participants for the room (needed for mention resolution and fallback)
-        const participants = await client.getParticipants(threadId);
-        const agent = await client.getAgentMe();
+      // API requires at least 1 mention but you can't mention yourself
+      // Fallback: prefer the last sender (the person we're replying to)
+      let mentions: MentionRequest[] = [];
+      const lastSender = lastSenderByThread.get(roomId);
 
-        if (mentionNames.length > 0) {
-          // Resolve mention names to full objects (excluding self-mentions)
-          mentions = mentionNames
-            .map((name) => {
-              const participant = participants.find((p) => p.name === name && p.id !== agent.id);
-              return participant ? { id: participant.id, name: participant.name } : null;
-            })
-            .filter((m): m is MentionRequest => m !== null);
+      if (lastSender) {
+        // Find the last sender in participants to verify they're still in the room
+        const senderParticipant = participants.find(
+          (p) => p.id === lastSender.senderId && p.id !== agent.id
+        );
+        if (senderParticipant) {
+          mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
         }
-
-        // API requires at least 1 mention but you can't mention yourself
-        // Fallback: prefer the last sender (the person we're replying to)
-        if (mentions.length === 0) {
-          const lastSender = lastSenderByThread.get(threadId);
-
-          if (lastSender) {
-            // Find the last sender in participants to verify they're still in the room
-            const senderParticipant = participants.find(
-              (p) => p.id === lastSender.senderId && p.id !== agent.id
-            );
-            if (senderParticipant) {
-              mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
-            }
-          }
-
-          // If still no mentions, fall back to first other participant
-          if (mentions.length === 0) {
-            const otherParticipant = participants.find((p) => p.id !== agent.id);
-            if (!otherParticipant) {
-              return { ok: false, error: "Cannot send message: no other participants to mention" };
-            }
-            mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
-          }
-        }
-
-        await client.sendMessage(threadId, text, mentions);
-        return { ok: true };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { ok: false, error: message };
       }
+
+      // If still no mentions, fall back to first other participant
+      if (mentions.length === 0) {
+        const otherParticipant = participants.find((p) => p.id !== agent.id);
+        if (!otherParticipant) {
+          throw new Error("Cannot send message: no other participants to mention");
+        }
+        mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
+      }
+
+      const result = await client.sendMessage(roomId, text, mentions);
+      console.log("[thenvoi] sendText result:", JSON.stringify(result));
+
+      return {
+        channel: "thenvoi",
+        messageId: result?.id ?? `thenvoi-${Date.now()}`,
+        roomId,
+      };
+    },
+
+    sendMedia: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
+      // Thenvoi doesn't support media yet - send as text with URL
+      const { text, to, mediaUrl, accountId } = ctx;
+      const roomId = to;
+
+      console.log("[thenvoi] sendMedia called - converting to text with URL");
+
+      if (!roomId) {
+        throw new Error("room_id is required");
+      }
+
+      const client = clients.get(accountId ?? "default");
+      if (!client) {
+        throw new Error("Thenvoi client not initialized");
+      }
+
+      // Combine caption with media URL
+      const messageText = mediaUrl ? `${text}\n\n${mediaUrl}` : text;
+
+      // Get participants for mention
+      const participants = await client.getParticipants(roomId);
+      const agent = await client.getAgentMe();
+
+      let mentions: MentionRequest[] = [];
+      const lastSender = lastSenderByThread.get(roomId);
+
+      if (lastSender) {
+        const senderParticipant = participants.find(
+          (p) => p.id === lastSender.senderId && p.id !== agent.id
+        );
+        if (senderParticipant) {
+          mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+        }
+      }
+
+      if (mentions.length === 0) {
+        const otherParticipant = participants.find((p) => p.id !== agent.id);
+        if (!otherParticipant) {
+          throw new Error("Cannot send message: no other participants to mention");
+        }
+        mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
+      }
+
+      const result = await client.sendMessage(roomId, messageText, mentions);
+
+      return {
+        channel: "thenvoi",
+        messageId: result?.id ?? `thenvoi-${Date.now()}`,
+        roomId,
+      };
     },
   },
 
@@ -301,11 +376,13 @@ export const thenvoiChannel: OpenClawChannel = {
   },
 
   gateway: {
-    start: async (
-      accountId: string,
-      accountConfig: ThenvoiAccountConfig,
-    ): Promise<void> => {
+    startAccount: async (ctx: GatewayContext): Promise<void> => {
+      const { accountId, account: accountConfig } = ctx;
+
+      console.log(`[thenvoi:${accountId}] Starting gateway...`);
+
       if (runtimes.has(accountId)) {
+        console.log(`[thenvoi:${accountId}] Already running`);
         return; // Already running
       }
 
@@ -314,6 +391,7 @@ export const thenvoiChannel: OpenClawChannel = {
       // Create REST client
       const client = new ThenvoiClient(config);
       clients.set(accountId, client);
+      console.log(`[thenvoi:${accountId}] Client registered`);
 
       // Create and start runtime with client
       const runtime = new ThenvoiRuntime(
@@ -364,7 +442,8 @@ export const thenvoiChannel: OpenClawChannel = {
       console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
     },
 
-    stop: async (accountId: string): Promise<void> => {
+    stopAccount: async (ctx: GatewayContext): Promise<void> => {
+      const { accountId } = ctx;
       const runtime = runtimes.get(accountId);
       if (runtime) {
         await runtime.disconnect();
@@ -373,7 +452,7 @@ export const thenvoiChannel: OpenClawChannel = {
 
       clients.delete(accountId);
 
-      console.log(`[thenvoi] Disconnected from Thenvoi platform (${accountId})`);
+      console.log(`[thenvoi:${accountId}] Disconnected from Thenvoi platform`);
     },
   },
 
@@ -384,6 +463,21 @@ export const thenvoiChannel: OpenClawChannel = {
 
     formatThreadContext: (threadId: string): string => {
       return `[Thenvoi Room: ${threadId}]`;
+    },
+  },
+
+  messaging: {
+    targetResolver: {
+      // UUID pattern for Thenvoi room IDs
+      looksLikeId: (raw: string): boolean => {
+        const trimmed = raw.trim();
+        // Match UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const isUuid = uuidPattern.test(trimmed);
+        console.log(`[thenvoi] looksLikeId("${trimmed}") = ${isUuid}`);
+        return isUuid;
+      },
+      hint: "Provide a Thenvoi room_id (UUID format)",
     },
   },
 };
@@ -403,6 +497,8 @@ export function registerChannel(api: OpenClawChannelApi): void {
     capabilities: thenvoiChannel.capabilities,
     hasGateway: !!thenvoiChannel.gateway,
     hasOutbound: !!thenvoiChannel.outbound,
+    hasMessaging: !!thenvoiChannel.messaging,
+    hasLooksLikeId: !!thenvoiChannel.messaging?.targetResolver?.looksLikeId,
   }, null, 2));
   api.registerChannel({ plugin: thenvoiChannel });
   console.log("[thenvoi] Channel registered successfully");

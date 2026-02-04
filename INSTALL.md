@@ -15,11 +15,9 @@ This guide explains how to install the Thenvoi channel plugin from GitHub on a c
 
 ```bash
 cd ~/.openclaw/plugins
-git clone -b feat/integrate-openclaw-INT-102 https://github.com/thenvoi/openclaw-channel-thenvoi.git thenvoi
+git clone https://github.com/thenvoi/openclaw-channel-thenvoi.git thenvoi
 cd thenvoi
 ```
-
-> **Note:** Use the branch `feat/integrate-openclaw-INT-102` until the code is merged to `main`.
 
 ### Step 2: Install Dependencies
 
@@ -62,8 +60,8 @@ Edit `~/.openclaw/openclaw.json` and add the plugin configuration:
               "enabled": true,
               "apiKey": "YOUR_THENVOI_API_KEY",
               "agentId": "YOUR_AGENT_UUID",
-              "wsUrl": "wss://platform.dev.thenvoi.com/api/v1/socket",
-              "restUrl": "https://platform.dev.thenvoi.com"
+              "wsUrl": "wss://app.thenvoi.com/api/v1/socket",
+              "restUrl": "https://app.thenvoi.com"
             }
           }
         }
@@ -88,14 +86,6 @@ The plugin will load automatically - OpenClaw's config file watcher detects chan
 | `agentId` | Yes | - | Your agent's UUID on Thenvoi |
 | `wsUrl` | No | `wss://app.thenvoi.com/api/v1/socket` | WebSocket endpoint |
 | `restUrl` | No | `https://app.thenvoi.com` | REST API endpoint |
-
-### Development Environment
-
-For Thenvoi development environment, use:
-```json
-"wsUrl": "wss://platform.dev.thenvoi.com/api/v1/socket",
-"restUrl": "https://platform.dev.thenvoi.com"
-```
 
 ## Verify Installation
 
@@ -142,26 +132,6 @@ The plugin is looking for environment variables. Ensure your credentials are in 
 ### Config warnings about "plugin id mismatch"
 
 These warnings can be ignored - they occur because OpenClaw scans all `.js` and `.ts` files in the plugin directory. The plugin still loads correctly.
-
-## Docker Installation
-
-For Docker-based OpenClaw, you can either:
-
-### Option 1: Install inside the container
-
-```bash
-docker exec -it <container-name> bash
-# Then follow the installation steps above
-```
-
-### Option 2: Mount the plugin directory
-
-```yaml
-services:
-  openclaw:
-    volumes:
-      - ./plugins/thenvoi:/home/node/.openclaw/plugins/thenvoi:ro
-```
 
 ## Complete Example: openclaw.json
 

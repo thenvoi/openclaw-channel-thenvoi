@@ -228,3 +228,20 @@ You may see warnings like:
 ```
 
 These warnings can be ignored - they occur because OpenClaw scans all `.js` and `.ts` files in the plugin directory. The plugin still loads correctly.
+
+### ERR_EMPTY_RESPONSE / Container fails to start
+
+If the Docker container fails to start and you get `ERR_EMPTY_RESPONSE` when accessing the gateway, check the container logs for:
+```
+EACCES: permission denied, mkdir '/.openclaw'
+```
+
+**Cause:** UID/GID mismatch between your `.env` file and the container's `node` user.
+
+**Fix:** Set the correct UID/GID in your `.env` file:
+```
+UID=1000
+GID=1000
+```
+
+The container's `node` user has UID 1000. macOS defaults (501:20) won't work.
