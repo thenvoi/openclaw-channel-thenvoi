@@ -100,6 +100,28 @@ interface OpenClawPluginApi {
 let activeRuntime: ThenvoiRuntime | null = null;
 let activeClient: ThenvoiClient | null = null;
 
+// Global registry to track runtime instances across module reloads
+// This survives Jiti reloading the module
+const RUNTIME_REGISTRY_KEY = "__thenvoi_runtime_registry__";
+interface RuntimeRegistry {
+  runtime: ThenvoiRuntime | null;
+  client: ThenvoiClient | null;
+}
+
+function getGlobalRegistry(): RuntimeRegistry {
+  const g = globalThis as unknown as Record<string, RuntimeRegistry>;
+  if (!g[RUNTIME_REGISTRY_KEY]) {
+    g[RUNTIME_REGISTRY_KEY] = { runtime: null, client: null };
+  }
+  return g[RUNTIME_REGISTRY_KEY];
+}
+
+function setGlobalRuntime(runtime: ThenvoiRuntime | null, client: ThenvoiClient | null): void {
+  const registry = getGlobalRegistry();
+  registry.runtime = runtime;
+  registry.client = client;
+}
+
 // OpenClaw runtime for message dispatch
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let openclawRuntime: any = null;
@@ -115,6 +137,21 @@ function createThenvoiService(pluginConfig?: Record<string, unknown>): PluginSer
     async start(ctx: PluginServiceContext): Promise<void> {
       const logger = ctx.logger;
       logger.info("Starting Thenvoi connection service...");
+
+      // Disconnect any existing runtime to prevent orphaned connections on reload
+      // Check both module-level and global registry (for cross-reload cleanup)
+      const globalRegistry = getGlobalRegistry();
+      if (globalRegistry.runtime) {
+        logger.info("Disconnecting previous runtime from global registry...");
+        await globalRegistry.runtime.disconnect();
+        setGlobalRuntime(null, null);
+      }
+      if (activeRuntime) {
+        logger.info("Disconnecting previous runtime before restart...");
+        await activeRuntime.disconnect();
+        activeRuntime = null;
+        activeClient = null;
+      }
 
       // Read config from plugin config (passed at registration) or ctx.config, with env fallback
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -283,6 +320,8 @@ function createThenvoiService(pluginConfig?: Record<string, unknown>): PluginSer
       );
 
       await activeRuntime.connect();
+      // Register globally to survive module reloads
+      setGlobalRuntime(activeRuntime, activeClient);
       logger.info("Connected to Thenvoi platform");
     },
 
@@ -291,10 +330,12 @@ function createThenvoiService(pluginConfig?: Record<string, unknown>): PluginSer
       logger.info("Stopping Thenvoi connection service...");
 
       if (activeRuntime) {
-        activeRuntime.disconnect();
+        await activeRuntime.disconnect();
         activeRuntime = null;
       }
       activeClient = null;
+      // Clear global registry
+      setGlobalRuntime(null, null);
 
       logger.info("Thenvoi connection service stopped");
     },
@@ -379,6 +420,14 @@ async function autoStart(): Promise<void> {
   }
 
   console.log("[thenvoi] Auto-starting with environment configuration...");
+
+  // Clean up any existing runtime from previous module load
+  const globalRegistry = getGlobalRegistry();
+  if (globalRegistry.runtime) {
+    console.log("[thenvoi] Disconnecting previous runtime from global registry...");
+    await globalRegistry.runtime.disconnect();
+    setGlobalRuntime(null, null);
+  }
 
   const config: ThenvoiConfig = { apiKey, agentId, wsUrl, restUrl };
 
@@ -521,6 +570,8 @@ async function autoStart(): Promise<void> {
   );
 
   await activeRuntime.connect();
+  // Register globally to survive module reloads
+  setGlobalRuntime(activeRuntime, activeClient);
   console.log("[thenvoi] Connected to Thenvoi platform");
 }
 
