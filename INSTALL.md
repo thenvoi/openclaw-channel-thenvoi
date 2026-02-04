@@ -76,18 +76,29 @@ Edit `~/.openclaw/openclaw.json` and add the plugin configuration:
 - `plugins.load.paths` - Path to the plugin directory
 - `plugins.entries.thenvoi` - Plugin configuration with credentials
 
-The plugin will load automatically - OpenClaw's config file watcher detects changes and reloads.
+### Step 5: Force Plugin Reload
 
-## Configuration Options
+The plugin registry may have cached a failed load attempt. To force a fresh load, add a `_reload` field to the config:
 
-| Setting | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `apiKey` | Yes | - | API key for Thenvoi authentication |
-| `agentId` | Yes | - | Your agent's UUID on Thenvoi |
-| `wsUrl` | No | `wss://app.thenvoi.com/api/v1/socket` | WebSocket endpoint |
-| `restUrl` | No | `https://app.thenvoi.com` | REST API endpoint |
+```json
+{
+  "plugins": {
+    "entries": {
+      "thenvoi": {
+        "enabled": true,
+        "config": {
+          "_reload": "1",
+          "accounts": { ... }
+        }
+      }
+    }
+  }
+}
+```
 
-## Verify Installation
+Save the file - OpenClaw's config watcher will detect the change and trigger a restart with a fresh plugin load.
+
+### Step 6: Verify Installation
 
 Check the logs for successful loading:
 
@@ -99,6 +110,15 @@ Check the logs for successful loading:
 ```
 
 The Thenvoi channel should appear in the OpenClaw UI.
+
+## Configuration Options
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `apiKey` | Yes | - | API key for Thenvoi authentication |
+| `agentId` | Yes | - | Your agent's UUID on Thenvoi |
+| `wsUrl` | No | `wss://app.thenvoi.com/api/v1/socket` | WebSocket endpoint |
+| `restUrl` | No | `https://app.thenvoi.com` | REST API endpoint |
 
 ## Troubleshooting
 
@@ -128,6 +148,49 @@ The plugin is looking for environment variables. Ensure your credentials are in 
 2. Verify the path in `plugins.load.paths` is correct
 3. Ensure `plugins.entries.thenvoi.enabled` is `true`
 4. Check logs for error messages
+
+### "Cannot find module" after build completes
+
+If the plugin fails with "Cannot find module" even after `npm run build` succeeds, this is due to OpenClaw's plugin registry caching. It happens when:
+1. OpenClaw started with the plugin path already in config
+2. `dist/index.js` didn't exist at that time
+3. The error state was cached in the plugin registry
+4. SIGUSR1 restart returns the cached registry without re-attempting to load
+
+**Fix (Option 1 - Recommended):** Invalidate the cache by modifying the plugin config. Add a `_reload` field (or change its value):
+```json
+{
+  "plugins": {
+    "entries": {
+      "thenvoi": {
+        "enabled": true,
+        "config": {
+          "_reload": "1",
+          "accounts": { ... }
+        }
+      }
+    }
+  }
+}
+```
+Save the file - OpenClaw's config watcher will detect the change and trigger a restart with a fresh plugin load (the changed config invalidates the plugin registry cache).
+
+Verify it worked by checking the logs for:
+```
+[thenvoi] Channel registered successfully
+[thenvoi] Plugin loaded, connection service registered
+```
+
+**Fix (Option 2):** Perform a full process restart:
+```bash
+# From outside the container
+docker restart <container-name>
+
+# Or from inside the container
+kill 1
+```
+
+**Prevention:** Always build the plugin before adding it to `openclaw.json`.
 
 ### Config warnings about "plugin id mismatch"
 
