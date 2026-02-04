@@ -131,9 +131,28 @@ interface PluginConfig {
 // Channel State
 // =============================================================================
 
-// Active runtimes per account
-const runtimes: Map<string, ThenvoiRuntime> = new Map();
-const clients: Map<string, ThenvoiClient> = new Map();
+// Global registry to track gateway runtimes across module reloads
+// This survives Jiti reloading the module
+const GATEWAY_REGISTRY_KEY = "__thenvoi_gateway_registry__";
+interface GatewayRegistry {
+  runtimes: Map<string, ThenvoiRuntime>;
+  clients: Map<string, ThenvoiClient>;
+}
+
+function getGatewayRegistry(): GatewayRegistry {
+  const g = globalThis as unknown as Record<string, GatewayRegistry>;
+  if (!g[GATEWAY_REGISTRY_KEY]) {
+    g[GATEWAY_REGISTRY_KEY] = {
+      runtimes: new Map(),
+      clients: new Map(),
+    };
+  }
+  return g[GATEWAY_REGISTRY_KEY];
+}
+
+// Active runtimes per account (use global registry)
+const runtimes = getGatewayRegistry().runtimes;
+const clients = getGatewayRegistry().clients;
 
 // Track last sender per thread for auto-mention fallback
 // Key: threadId, Value: { senderId, senderName }
@@ -381,9 +400,15 @@ export const thenvoiChannel: OpenClawChannel = {
 
       console.log(`[thenvoi:${accountId}] Starting gateway...`);
 
+      // Disconnect any existing runtime to prevent orphaned connections on reload
       if (runtimes.has(accountId)) {
-        console.log(`[thenvoi:${accountId}] Already running`);
-        return; // Already running
+        console.log(`[thenvoi:${accountId}] Disconnecting previous runtime before restart...`);
+        const existingRuntime = runtimes.get(accountId);
+        if (existingRuntime) {
+          await existingRuntime.disconnect();
+        }
+        runtimes.delete(accountId);
+        clients.delete(accountId);
       }
 
       const config = resolveConfig(accountConfig);
