@@ -12,8 +12,8 @@ import { ThenvoiRuntime } from '../dist/index.js';
 const config = {
   apiKey: process.env.THENVOI_API_KEY,
   agentId: process.env.THENVOI_AGENT_ID,
-  wsUrl: process.env.THENVOI_WS_URL || 'wss://api.thenvoi.com/socket',
-  restUrl: process.env.THENVOI_REST_URL || 'https://api.thenvoi.com',
+  wsUrl: process.env.THENVOI_WS_URL || 'wss://app.thenvoi.com/api/v1/socket',
+  restUrl: process.env.THENVOI_REST_URL || 'https://app.thenvoi.com',
 };
 
 console.log('Testing Thenvoi connection...');

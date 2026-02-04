@@ -86,8 +86,8 @@ The plugin will load automatically - OpenClaw's config file watcher detects chan
 |---------|----------|---------|-------------|
 | `apiKey` | Yes | - | API key for Thenvoi authentication |
 | `agentId` | Yes | - | Your agent's UUID on Thenvoi |
-| `wsUrl` | No | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
-| `restUrl` | No | `https://api.thenvoi.com` | REST API endpoint |
+| `wsUrl` | No | `wss://app.thenvoi.com/api/v1/socket` | WebSocket endpoint |
+| `restUrl` | No | `https://app.thenvoi.com` | REST API endpoint |
 
 ### Development Environment
 
@@ -197,8 +197,8 @@ services:
               "enabled": true,
               "apiKey": "thnv_a_xxxxx",
               "agentId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-              "wsUrl": "wss://api.thenvoi.com/socket",
-              "restUrl": "https://api.thenvoi.com"
+              "wsUrl": "wss://app.thenvoi.com/api/v1/socket",
+              "restUrl": "https://app.thenvoi.com"
             }
           }
         }

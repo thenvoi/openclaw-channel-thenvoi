@@ -31,13 +31,13 @@ describe("ThenvoiClient", () => {
     it("should strip trailing slash from baseUrl", () => {
       const configWithSlash = {
         ...mockThenvoiConfig,
-        restUrl: "https://api.thenvoi.com/",
+        restUrl: "https://app.thenvoi.com/",
       };
       const clientWithSlash = new ThenvoiClient(configWithSlash);
       mockFetchOnce(fetchMock, { response: { data: mockAgentMetadata } });
       clientWithSlash.getAgentMe();
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://api.thenvoi.com/api/v1/agent/me",
+        "https://app.thenvoi.com/api/v1/agent/me",
         expect.any(Object),
       );
     });

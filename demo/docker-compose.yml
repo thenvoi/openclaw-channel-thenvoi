@@ -55,8 +55,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - THENVOI_API_KEY=${THENVOI_API_KEY}
       - THENVOI_AGENT_ID=${THENVOI_AGENT_ID}
-      - THENVOI_WS_URL=${THENVOI_WS_URL:-wss://api.thenvoi.com/socket/websocket}
-      - THENVOI_REST_URL=${THENVOI_REST_URL:-https://api.thenvoi.com}
+      - THENVOI_WS_URL=${THENVOI_WS_URL:-wss://app.thenvoi.com/api/v1/socket}
+      - THENVOI_REST_URL=${THENVOI_REST_URL:-https://app.thenvoi.com}
       - OPENCLAW_PLUGINS=/home/node/.openclaw/plugins
 
     # === HEALTH CHECK ===

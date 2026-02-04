@@ -370,8 +370,8 @@ export default function plugin(api: OpenClawPluginApi): void {
 async function autoStart(): Promise<void> {
   const apiKey = process.env.THENVOI_API_KEY;
   const agentId = process.env.THENVOI_AGENT_ID;
-  const wsUrl = process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
-  const restUrl = process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
+  const wsUrl = process.env.THENVOI_WS_URL ?? "wss://app.thenvoi.com/api/v1/socket";
+  const restUrl = process.env.THENVOI_REST_URL ?? "https://app.thenvoi.com";
 
   if (!apiKey || !agentId) {
     console.log("[thenvoi] Skipping auto-start: missing required environment variables");

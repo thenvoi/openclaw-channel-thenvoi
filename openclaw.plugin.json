@@ -65,12 +65,12 @@
             },
             "wsUrl": {
               "type": "string",
-              "default": "wss://api.thenvoi.com/socket",
+              "default": "wss://app.thenvoi.com/api/v1/socket",
               "description": "Thenvoi WebSocket URL"
             },
             "restUrl": {
               "type": "string",
-              "default": "https://api.thenvoi.com",
+              "default": "https://app.thenvoi.com",
               "description": "Thenvoi REST API URL"
             }
           },
@@ -89,10 +89,10 @@
       "placeholder": "agent-uuid-here"
     },
     "wsUrl": {
-      "placeholder": "wss://api.thenvoi.com/socket"
+      "placeholder": "wss://app.thenvoi.com/api/v1/socket"
     },
     "restUrl": {
-      "placeholder": "https://api.thenvoi.com"
+      "placeholder": "https://app.thenvoi.com"
     }
   },
 
@@ -109,12 +109,12 @@
     "THENVOI_WS_URL": {
       "description": "Thenvoi WebSocket endpoint",
       "required": false,
-      "default": "wss://api.thenvoi.com/socket"
+      "default": "wss://app.thenvoi.com/api/v1/socket"
     },
     "THENVOI_REST_URL": {
       "description": "Thenvoi REST API endpoint",
       "required": false,
-      "default": "https://api.thenvoi.com"
+      "default": "https://app.thenvoi.com"
     }
   }
 }

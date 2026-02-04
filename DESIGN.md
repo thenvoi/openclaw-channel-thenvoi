@@ -58,7 +58,7 @@ This plugin enables OpenClaw agents to connect to the Thenvoi platform, allowing
 
 Thenvoi uses [Phoenix Channels](https://hexdocs.pm/phoenix/channels.html) for real-time communication.
 
-**Connection URL:** `wss://api.thenvoi.com/socket` (configurable via `THENVOI_WS_URL`)
+**Connection URL:** `wss://app.thenvoi.com/api/v1/socket` (configurable via `THENVOI_WS_URL`)
 
 **Message Format:**
 ```typescript
@@ -79,7 +79,7 @@ Thenvoi uses [Phoenix Channels](https://hexdocs.pm/phoenix/channels.html) for re
 
 ### REST API
 
-Base URL: `https://api.thenvoi.com` (configurable via `THENVOI_REST_URL`)
+Base URL: `https://app.thenvoi.com` (configurable via `THENVOI_REST_URL`)
 
 **Key Endpoints:**
 | Method | Endpoint | Purpose |
@@ -378,8 +378,8 @@ Configuration is provided via **`openclaw.yaml`** with optional environment vari
 |---------|--------------|---------|-------------|
 | `apiKey` | `THENVOI_API_KEY` | - | API key for authentication |
 | `agentId` | `THENVOI_AGENT_ID` | - | Agent identifier on Thenvoi |
-| `wsUrl` | `THENVOI_WS_URL` | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
-| `restUrl` | `THENVOI_REST_URL` | `https://api.thenvoi.com` | REST API endpoint |
+| `wsUrl` | `THENVOI_WS_URL` | `wss://app.thenvoi.com/api/v1/socket` | WebSocket endpoint |
+| `restUrl` | `THENVOI_REST_URL` | `https://app.thenvoi.com` | REST API endpoint |
 
 ### OpenClaw Configuration
 
@@ -393,8 +393,8 @@ channels:
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
         # Optional: custom endpoints
-        # wsUrl: wss://api.thenvoi.com/socket
-        # restUrl: https://api.thenvoi.com
+        # wsUrl: wss://app.thenvoi.com/api/v1/socket
+        # restUrl: https://app.thenvoi.com
 ```
 
 **Note:** The demo environment uses `demo/.env.example` for credentials.
@@ -439,8 +439,8 @@ channels:
         enabled: true
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
-        wsUrl: wss://api.thenvoi.com/socket
-        restUrl: https://api.thenvoi.com
+        wsUrl: wss://app.thenvoi.com/api/v1/socket
+        restUrl: https://app.thenvoi.com
 ```
 
 ### 4. Define Your Agent
@@ -927,8 +927,8 @@ jobs:
 |----------|-------------|
 | [Thenvoi Python SDK](https://github.com/thenvoi/thenvoi-sdk-python) | Reference implementation (Python) |
 | [Phoenix Channels Client](https://github.com/thenvoi/phoenix-channels-python-client-alpha) | WebSocket client library |
-| Thenvoi REST API | Base URL: `https://api.thenvoi.com` |
-| Thenvoi WebSocket | Endpoint: `wss://api.thenvoi.com/socket` |
+| Thenvoi REST API | Base URL: `https://app.thenvoi.com` |
+| Thenvoi WebSocket | Endpoint: `wss://app.thenvoi.com/api/v1/socket` |
 
 ### Phoenix Channels
 
