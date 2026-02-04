@@ -25,7 +25,6 @@ channels:
         # Credentials loaded from environment variables:
         # - THENVOI_API_KEY
         # - THENVOI_AGENT_ID
-        # - THENVOI_API_KEY_USER
 
 # Agent configuration
 agent:

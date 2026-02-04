@@ -22,11 +22,10 @@
  * Required environment variables:
  * - THENVOI_API_KEY: API key for authentication
  * - THENVOI_AGENT_ID: Agent identifier on Thenvoi
- * - THENVOI_API_KEY_USER: User identifier on Thenvoi
  *
  * Optional environment variables:
- * - THENVOI_WS_URL: WebSocket endpoint (default: wss://api.thenvoi.com/socket)
- * - THENVOI_REST_URL: REST API endpoint (default: https://api.thenvoi.com)
+ * - THENVOI_WS_URL: WebSocket endpoint (default: wss://app.thenvoi.com/api/v1/socket)
+ * - THENVOI_REST_URL: REST API endpoint (default: https://app.thenvoi.com)
  *
  * @packageDocumentation
  */
@@ -125,18 +124,17 @@ function createThenvoiService(pluginConfig?: Record<string, unknown>): PluginSer
 
       const apiKey = defaultAccount?.apiKey ?? process.env.THENVOI_API_KEY;
       const agentId = defaultAccount?.agentId ?? process.env.THENVOI_AGENT_ID;
-      const userId = defaultAccount?.userId ?? process.env.THENVOI_API_KEY_USER;
-      const wsUrl = defaultAccount?.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
-      const restUrl = defaultAccount?.restUrl ?? process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
+      const wsUrl = defaultAccount?.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://app.thenvoi.com/api/v1/socket";
+      const restUrl = defaultAccount?.restUrl ?? process.env.THENVOI_REST_URL ?? "https://app.thenvoi.com";
 
-      if (!apiKey || !agentId || !userId) {
-        logger.warn("Skipping Thenvoi connection: missing credentials. Configure in openclaw.json plugins.entries.thenvoi.config.accounts.default or set THENVOI_API_KEY, THENVOI_AGENT_ID, THENVOI_API_KEY_USER environment variables");
+      if (!apiKey || !agentId) {
+        logger.warn("Skipping Thenvoi connection: missing credentials. Configure in openclaw.json plugins.entries.thenvoi.config.accounts.default or set THENVOI_API_KEY, THENVOI_AGENT_ID environment variables");
         return;
       }
 
       logger.info(`Connecting to Thenvoi as agent ${agentId}...`);
 
-      const config: ThenvoiConfig = { apiKey, agentId, userId, wsUrl, restUrl };
+      const config: ThenvoiConfig = { apiKey, agentId, wsUrl, restUrl };
 
       // Create REST client
       activeClient = new ThenvoiClient(config);
@@ -372,18 +370,17 @@ export default function plugin(api: OpenClawPluginApi): void {
 async function autoStart(): Promise<void> {
   const apiKey = process.env.THENVOI_API_KEY;
   const agentId = process.env.THENVOI_AGENT_ID;
-  const userId = process.env.THENVOI_API_KEY_USER;
   const wsUrl = process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
   const restUrl = process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
 
-  if (!apiKey || !agentId || !userId) {
+  if (!apiKey || !agentId) {
     console.log("[thenvoi] Skipping auto-start: missing required environment variables");
     return;
   }
 
   console.log("[thenvoi] Auto-starting with environment configuration...");
 
-  const config: ThenvoiConfig = { apiKey, agentId, userId, wsUrl, restUrl };
+  const config: ThenvoiConfig = { apiKey, agentId, wsUrl, restUrl };
 
   // Create REST client
   activeClient = new ThenvoiClient(config);

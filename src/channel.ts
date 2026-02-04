@@ -157,7 +157,6 @@ export function deliverMessage(message: OpenClawInboundMessage): void {
 function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
   const apiKey = account.apiKey ?? process.env.THENVOI_API_KEY;
   const agentId = account.agentId ?? process.env.THENVOI_AGENT_ID;
-  const userId = account.userId ?? process.env.THENVOI_API_KEY_USER;
   const wsUrl = account.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket";
   const restUrl = account.restUrl ?? process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
 
@@ -167,11 +166,8 @@ function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
   if (!agentId) {
     throw new Error("THENVOI_AGENT_ID is required");
   }
-  if (!userId) {
-    throw new Error("THENVOI_API_KEY_USER is required");
-  }
 
-  return { apiKey, agentId, userId, wsUrl, restUrl };
+  return { apiKey, agentId, wsUrl, restUrl };
 }
 
 // =============================================================================

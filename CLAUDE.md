@@ -64,9 +64,8 @@ Configuration is provided via **`openclaw.yaml`** (primary) with environment var
 |---------|--------------|-------------|
 | `apiKey` | `THENVOI_API_KEY` | API key for authentication |
 | `agentId` | `THENVOI_AGENT_ID` | Agent identifier on Thenvoi |
-| `userId` | `THENVOI_API_KEY_USER` | User identifier on Thenvoi |
-| `wsUrl` | `THENVOI_WS_URL` | WebSocket endpoint (default: `wss://api.thenvoi.com/socket`) |
-| `restUrl` | `THENVOI_REST_URL` | REST API endpoint (default: `https://api.thenvoi.com`) |
+| `wsUrl` | `THENVOI_WS_URL` | WebSocket endpoint (default: `wss://app.thenvoi.com/api/v1/socket`) |
+| `restUrl` | `THENVOI_REST_URL` | REST API endpoint (default: `https://app.thenvoi.com`) |
 
 **Note:** The `.env` file is only needed for the demo environment (`demo/.env.example`).
 
@@ -148,7 +147,7 @@ The `demo/` folder contains a Docker Compose setup for running an OpenClaw agent
    # Edit .env with your credentials:
    # - OPENCLAW_GATEWAY_TOKEN (generate with: openclaw doctor --generate-gateway-token)
    # - ANTHROPIC_API_KEY
-   # - THENVOI_API_KEY, THENVOI_AGENT_ID, THENVOI_API_KEY_USER
+   # - THENVOI_API_KEY, THENVOI_AGENT_ID
    ```
 
 ### Running the Demo

@@ -290,7 +290,7 @@ The plugin MUST skip messages sent by itself:
 ```typescript
 function handleMessageCreated(payload: MessageCreatedPayload): void {
   // Skip messages from self
-  if (payload.sender_type === 'Agent' && payload.sender_id === this.userId) {
+  if (payload.sender_type === 'Agent' && payload.sender_id === this.agentId) {
     console.debug(`[thenvoi] Skipping own message ${payload.id}`);
     return;
   }
@@ -378,7 +378,6 @@ Configuration is provided via **`openclaw.yaml`** with optional environment vari
 |---------|--------------|---------|-------------|
 | `apiKey` | `THENVOI_API_KEY` | - | API key for authentication |
 | `agentId` | `THENVOI_AGENT_ID` | - | Agent identifier on Thenvoi |
-| `userId` | `THENVOI_API_KEY_USER` | - | User identifier on Thenvoi |
 | `wsUrl` | `THENVOI_WS_URL` | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
 | `restUrl` | `THENVOI_REST_URL` | `https://api.thenvoi.com` | REST API endpoint |
 
@@ -393,7 +392,6 @@ channels:
         enabled: true
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
-        userId: ${THENVOI_API_KEY_USER}
         # Optional: custom endpoints
         # wsUrl: wss://api.thenvoi.com/socket
         # restUrl: https://api.thenvoi.com
@@ -421,7 +419,6 @@ Set your Thenvoi credentials as environment variables or directly in `openclaw.y
 ```bash
 export THENVOI_API_KEY=tv_your_api_key_here
 export THENVOI_AGENT_ID=your-agent-uuid
-export THENVOI_API_KEY_USER=your-user-uuid
 ```
 
 ### 3. Configure OpenClaw
@@ -442,7 +439,6 @@ channels:
         enabled: true
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
-        userId: ${THENVOI_API_KEY_USER}
         wsUrl: wss://api.thenvoi.com/socket
         restUrl: https://api.thenvoi.com
 ```
@@ -758,7 +754,7 @@ describe("ThenvoiClient", () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => ({ id: "msg-1" }) });
     global.fetch = mockFetch;
 
-    const client = new ThenvoiClient({ apiKey: "test", agentId: "agent-1", userId: "user-1", ... });
+    const client = new ThenvoiClient({ apiKey: "test", agentId: "agent-1", ... });
     await client.sendMessage("room-1", "Hello", ["User"]);
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -899,7 +895,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       THENVOI_API_KEY: ${{ secrets.THENVOI_API_KEY }}
-      THENVOI_API_KEY_USER: ${{ secrets.THENVOI_API_KEY_USER }}
+      THENVOI_AGENT_ID: ${{ secrets.THENVOI_AGENT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

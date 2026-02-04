@@ -8,7 +8,6 @@ This guide explains how to install the Thenvoi channel plugin from GitHub on a c
 - Thenvoi credentials:
   - `apiKey` - Your Thenvoi API key (starts with `thnv_a_` or `tv_`)
   - `agentId` - Your agent's UUID on Thenvoi
-  - `userId` - Your user identifier on Thenvoi (starts with `thnv_u_`)
 
 ## Installation Steps
 
@@ -63,7 +62,6 @@ Edit `~/.openclaw/openclaw.json` and add the plugin configuration:
               "enabled": true,
               "apiKey": "YOUR_THENVOI_API_KEY",
               "agentId": "YOUR_AGENT_UUID",
-              "userId": "YOUR_USER_ID",
               "wsUrl": "wss://platform.dev.thenvoi.com/api/v1/socket",
               "restUrl": "https://platform.dev.thenvoi.com"
             }
@@ -88,7 +86,6 @@ The plugin will load automatically - OpenClaw's config file watcher detects chan
 |---------|----------|---------|-------------|
 | `apiKey` | Yes | - | API key for Thenvoi authentication |
 | `agentId` | Yes | - | Your agent's UUID on Thenvoi |
-| `userId` | Yes | - | User identifier on Thenvoi |
 | `wsUrl` | No | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
 | `restUrl` | No | `https://api.thenvoi.com` | REST API endpoint |
 
@@ -200,7 +197,6 @@ services:
               "enabled": true,
               "apiKey": "thnv_a_xxxxx",
               "agentId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-              "userId": "thnv_u_xxxxx",
               "wsUrl": "wss://api.thenvoi.com/socket",
               "restUrl": "https://api.thenvoi.com"
             }

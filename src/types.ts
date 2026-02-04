@@ -9,7 +9,6 @@
 export interface ThenvoiConfig {
   apiKey: string;
   agentId: string;
-  userId: string;
   wsUrl: string;
   restUrl: string;
 }
@@ -18,7 +17,6 @@ export interface ThenvoiAccountConfig {
   enabled?: boolean;
   apiKey?: string;
   agentId?: string;
-  userId?: string;
   wsUrl?: string;
   restUrl?: string;
 }

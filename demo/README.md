@@ -41,7 +41,6 @@ docker logs -f openclaw-thenvoi-agent
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
 | `THENVOI_API_KEY` | Thenvoi platform API key |
 | `THENVOI_AGENT_ID` | Your agent's UUID on Thenvoi |
-| `THENVOI_API_KEY_USER` | User UUID associated with API key |
 
 ## Directory Structure
 

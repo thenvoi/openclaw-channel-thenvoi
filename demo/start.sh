@@ -42,7 +42,6 @@ MISSING_VARS=()
 [[ -z "${ANTHROPIC_API_KEY:-}" ]] && MISSING_VARS+=("ANTHROPIC_API_KEY")
 [[ -z "${THENVOI_API_KEY:-}" ]] && MISSING_VARS+=("THENVOI_API_KEY")
 [[ -z "${THENVOI_AGENT_ID:-}" ]] && MISSING_VARS+=("THENVOI_AGENT_ID")
-[[ -z "${THENVOI_API_KEY_USER:-}" ]] && MISSING_VARS+=("THENVOI_API_KEY_USER")
 
 if [[ ${#MISSING_VARS[@]} -gt 0 ]]; then
     log_error "Missing required environment variables:"

@@ -63,10 +63,6 @@
               "type": "string",
               "description": "Thenvoi agent ID (or use THENVOI_AGENT_ID env var)"
             },
-            "userId": {
-              "type": "string",
-              "description": "Thenvoi user ID (or use THENVOI_API_KEY_USER env var)"
-            },
             "wsUrl": {
               "type": "string",
               "default": "wss://api.thenvoi.com/socket",
@@ -92,9 +88,6 @@
     "agentId": {
       "placeholder": "agent-uuid-here"
     },
-    "userId": {
-      "placeholder": "user-uuid-here"
-    },
     "wsUrl": {
       "placeholder": "wss://api.thenvoi.com/socket"
     },
@@ -111,10 +104,6 @@
     },
     "THENVOI_AGENT_ID": {
       "description": "Agent identifier on Thenvoi platform",
-      "required": true
-    },
-    "THENVOI_API_KEY_USER": {
-      "description": "User identifier on Thenvoi platform",
       "required": true
     },
     "THENVOI_WS_URL": {

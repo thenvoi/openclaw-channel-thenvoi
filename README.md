@@ -34,7 +34,6 @@ channels:
         enabled: true
         apiKey: ${THENVOI_API_KEY}
         agentId: ${THENVOI_AGENT_ID}
-        userId: ${THENVOI_API_KEY_USER}
         # Optional: custom endpoints
         # wsUrl: wss://api.thenvoi.com/socket
         # restUrl: https://api.thenvoi.com
@@ -44,7 +43,6 @@ channels:
 |---------|----------|---------|-------------|
 | `apiKey` | Yes | - | API key for authentication |
 | `agentId` | Yes | - | Agent identifier on Thenvoi |
-| `userId` | Yes | - | User identifier on Thenvoi |
 | `wsUrl` | No | `wss://api.thenvoi.com/socket` | WebSocket endpoint |
 | `restUrl` | No | `https://api.thenvoi.com` | REST API endpoint |
 
