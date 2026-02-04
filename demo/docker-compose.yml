@@ -1,0 +1,79 @@
+# OpenClaw + Thenvoi Channel - Secure Docker Compose
+#
+# Prerequisites:
+#   1. Clone OpenClaw: git clone https://github.com/openclaw/openclaw.git
+#   2. Build image: cd openclaw && docker build -t openclaw:local .
+#   3. Copy .env.example to .env and fill in credentials
+#   4. Run: docker compose up -d
+#
+version: '3.8'
+
+services:
+  openclaw-thenvoi:
+    # Built from official OpenClaw source
+    image: openclaw:local
+    container_name: openclaw-thenvoi-agent
+    restart: unless-stopped
+
+    # === SECURITY HARDENING ===
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+    # === RESOURCE LIMITS ===
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 2
+    pids_limit: 100
+
+    # === NETWORK (localhost only) ===
+    ports:
+      - "127.0.0.1:18789:18789"
+    networks:
+      - openclaw-isolated
+
+    # === VOLUMES ===
+    volumes:
+      # Main openclaw config directory
+      - ./openclaw-config:/home/node/.openclaw:rw
+      # Thenvoi plugin (read-only)
+      - ./plugins/thenvoi:/home/node/.openclaw/plugins/thenvoi:ro
+
+    tmpfs:
+      - /tmp:size=100M,mode=1777,uid=1000,gid=1000
+      - /home/node/.cache:size=200M,mode=755,uid=1000,gid=1000
+
+    # === ENVIRONMENT ===
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - OPENCLAW_GATEWAY_BIND=lan
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - THENVOI_API_KEY=${THENVOI_API_KEY}
+      - THENVOI_AGENT_ID=${THENVOI_AGENT_ID}
+      - THENVOI_WS_URL=${THENVOI_WS_URL:-wss://app.thenvoi.com/api/v1/socket}
+      - THENVOI_REST_URL=${THENVOI_REST_URL:-https://app.thenvoi.com}
+      - OPENCLAW_PLUGINS=/home/node/.openclaw/plugins
+
+    # === HEALTH CHECK ===
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18789/health", "-H", "Authorization: Bearer ${OPENCLAW_GATEWAY_TOKEN}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # === LOGGING ===
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  openclaw-isolated:
+    driver: bridge

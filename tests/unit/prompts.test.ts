@@ -1,0 +1,102 @@
+/**
+ * Unit tests for prompts module.
+ */
+
+import { describe, it, expect } from "vitest";
+import { BASE_INSTRUCTIONS, buildSystemPrompt } from "../../src/prompts.js";
+
+describe("Prompts", () => {
+  describe("BASE_INSTRUCTIONS", () => {
+    it("should contain environment section", () => {
+      expect(BASE_INSTRUCTIONS).toContain("## Environment");
+    });
+
+    it("should contain delegation instructions", () => {
+      expect(BASE_INSTRUCTIONS).toContain("CRITICAL: Delegate");
+      expect(BASE_INSTRUCTIONS).toContain("lookup_peers");
+      expect(BASE_INSTRUCTIONS).toContain("add_participant");
+    });
+
+    it("should contain thinking instructions", () => {
+      expect(BASE_INSTRUCTIONS).toContain("send_event");
+      expect(BASE_INSTRUCTIONS).toContain("thought");
+    });
+
+    it("should contain examples", () => {
+      expect(BASE_INSTRUCTIONS).toContain("## Examples");
+    });
+
+    it("should not remove agents automatically", () => {
+      expect(BASE_INSTRUCTIONS).toContain("Do NOT Remove Agents Automatically");
+    });
+
+    it("should relay information back", () => {
+      expect(BASE_INSTRUCTIONS).toContain("Relay Information Back");
+    });
+  });
+
+  describe("buildSystemPrompt", () => {
+    it("should include agent identity", () => {
+      const prompt = buildSystemPrompt(
+        "Weather Agent",
+        "a helpful weather assistant",
+      );
+
+      expect(prompt).toContain("You are Weather Agent");
+      expect(prompt).toContain("a helpful weather assistant");
+    });
+
+    it("should include base instructions", () => {
+      const prompt = buildSystemPrompt("Test Agent", "a test agent");
+
+      expect(prompt).toContain("## Environment");
+      expect(prompt).toContain("lookup_peers");
+    });
+
+    it("should include custom instructions when provided", () => {
+      const customInstructions = "Always be polite and helpful.";
+      const prompt = buildSystemPrompt(
+        "Test Agent",
+        "a test agent",
+        customInstructions,
+      );
+
+      expect(prompt).toContain(customInstructions);
+    });
+
+    it("should order sections correctly", () => {
+      const customInstructions = "CUSTOM_MARKER";
+      const prompt = buildSystemPrompt(
+        "Test Agent",
+        "a test agent",
+        customInstructions,
+      );
+
+      const identityIndex = prompt.indexOf("You are Test Agent");
+      const customIndex = prompt.indexOf("CUSTOM_MARKER");
+      const baseIndex = prompt.indexOf("## Environment");
+
+      expect(identityIndex).toBeLessThan(customIndex);
+      expect(customIndex).toBeLessThan(baseIndex);
+    });
+
+    it("should work without custom instructions", () => {
+      const prompt = buildSystemPrompt("Test Agent", "a test agent");
+
+      expect(prompt).toContain("You are Test Agent");
+      expect(prompt).toContain("## Environment");
+      expect(prompt).not.toContain("undefined");
+    });
+
+    it("should separate sections with blank lines", () => {
+      const prompt = buildSystemPrompt(
+        "Test Agent",
+        "a test agent",
+        "Custom section",
+      );
+
+      // Check for double newlines (blank line separation)
+      expect(prompt).toContain("\n\n");
+    });
+  });
+});

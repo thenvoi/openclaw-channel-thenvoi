@@ -1,0 +1,17 @@
+# Environment files with secrets
+.env
+
+# Cloned OpenClaw repo (built locally)
+openclaw/
+
+# Built plugin copy
+plugins/
+
+# Runtime directories (contain user data)
+openclaw-config/
+
+# Keep config template
+!openclaw-config/openclaw.json
+
+# Docker volumes
+*.log

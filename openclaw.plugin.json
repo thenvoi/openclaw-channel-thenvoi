@@ -1,0 +1,120 @@
+{
+  "$schema": "https://openclaw.ai/schemas/plugin.json",
+  "id": "thenvoi",
+  "name": "Thenvoi",
+  "version": "0.1.0",
+  "description": "Connect OpenClaw to the Thenvoi AI agent collaboration platform",
+  "author": "Thenvoi",
+  "license": "MIT",
+  "repository": "https://github.com/thenvoi/openclaw-channel-thenvoi",
+  "entry": "dist/index.js",
+  "type": "channel",
+
+  "openclaw.channel": {
+    "id": "thenvoi",
+    "label": "Thenvoi",
+    "selectionLabel": "Thenvoi (AI Collaboration)",
+    "docsPath": "/channels/thenvoi",
+    "blurb": "Connect to the Thenvoi AI agent collaboration platform.",
+    "order": 100,
+    "aliases": ["thenvoi"]
+  },
+
+  "openclaw.install": {
+    "githubRepo": "thenvoi/openclaw-channel-thenvoi",
+    "defaultChoice": false
+  },
+
+  "capabilities": {
+    "channel": {
+      "chatTypes": ["direct", "group"],
+      "features": ["threading", "mentions"]
+    },
+    "mcp": {
+      "tools": [
+        "thenvoi_lookup_peers",
+        "thenvoi_add_participant",
+        "thenvoi_remove_participant",
+        "thenvoi_get_participants",
+        "thenvoi_create_chatroom",
+        "thenvoi_send_event",
+        "thenvoi_send_message"
+      ]
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "accounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "Thenvoi API key (or use THENVOI_API_KEY env var)"
+            },
+            "agentId": {
+              "type": "string",
+              "description": "Thenvoi agent ID (or use THENVOI_AGENT_ID env var)"
+            },
+            "wsUrl": {
+              "type": "string",
+              "default": "wss://app.thenvoi.com/api/v1/socket",
+              "description": "Thenvoi WebSocket URL"
+            },
+            "restUrl": {
+              "type": "string",
+              "default": "https://app.thenvoi.com",
+              "description": "Thenvoi REST API URL"
+            }
+          },
+          "required": []
+        }
+      }
+    }
+  },
+
+  "uiHints": {
+    "apiKey": {
+      "sensitive": true,
+      "placeholder": "tv_..."
+    },
+    "agentId": {
+      "placeholder": "agent-uuid-here"
+    },
+    "wsUrl": {
+      "placeholder": "wss://app.thenvoi.com/api/v1/socket"
+    },
+    "restUrl": {
+      "placeholder": "https://app.thenvoi.com"
+    }
+  },
+
+  "environment": {
+    "THENVOI_API_KEY": {
+      "description": "API key for Thenvoi platform authentication",
+      "required": true,
+      "sensitive": true
+    },
+    "THENVOI_AGENT_ID": {
+      "description": "Agent identifier on Thenvoi platform",
+      "required": true
+    },
+    "THENVOI_WS_URL": {
+      "description": "Thenvoi WebSocket endpoint",
+      "required": false,
+      "default": "wss://app.thenvoi.com/api/v1/socket"
+    },
+    "THENVOI_REST_URL": {
+      "description": "Thenvoi REST API endpoint",
+      "required": false,
+      "default": "https://app.thenvoi.com"
+    }
+  }
+}
