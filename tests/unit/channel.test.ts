@@ -105,23 +105,24 @@ describe("Channel Module", () => {
     });
 
     describe("sendText", () => {
-      it("should fail when threadId not provided", async () => {
-        const result = await thenvoiChannel.outbound.sendText({
-          text: "Hello",
-        });
-
-        expect(result.ok).toBe(false);
-        expect(result.error).toContain("threadId");
+      it("should fail when target (to) not provided", async () => {
+        await expect(
+          thenvoiChannel.outbound.sendText({
+            cfg: {},
+            to: "",
+            text: "Hello",
+          })
+        ).rejects.toThrow("room_id is required");
       });
 
       it("should fail when client not initialized", async () => {
-        const result = await thenvoiChannel.outbound.sendText({
-          text: "Hello",
-          threadId: "room-001",
-        });
-
-        expect(result.ok).toBe(false);
-        expect(result.error).toContain("not initialized");
+        await expect(
+          thenvoiChannel.outbound.sendText({
+            cfg: {},
+            to: "room-001",
+            text: "Hello",
+          })
+        ).rejects.toThrow("not initialized");
       });
     });
   });
