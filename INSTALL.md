@@ -19,10 +19,10 @@ git clone https://github.com/thenvoi/openclaw-channel-thenvoi.git thenvoi
 cd thenvoi
 ```
 
-### Step 2: Install Dependencies
+### Step 2: Install Dependencies Including Dev
 
 ```bash
-npm install
+npm install --include=dev
 ```
 
 > **Note for Docker/Production environments:** If `NODE_ENV=production` is set (common in Docker containers), npm skips devDependencies by default. Use `npm install --include=dev` to ensure build tools like `tsup` are installed.
