@@ -161,6 +161,22 @@ const lastSenderByThread: Map<string, { senderId: string; senderName: string }> 
 // Gateway callback for delivering inbound messages
 let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
 
+// OpenClaw runtime reference for message dispatch
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let openclawRuntime: any = null;
+
+/**
+ * Set the OpenClaw runtime reference for message dispatch.
+ * Called by the plugin entry point.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function setOpenClawRuntime(runtime: any): void {
+  openclawRuntime = runtime;
+  if (runtime?.channel?.reply) {
+    console.log("[thenvoi] OpenClaw dispatch methods available");
+  }
+}
+
 /**
  * Set the gateway callback for delivering inbound messages.
  * Called by OpenClaw when the channel is started.
@@ -209,6 +225,56 @@ function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
   }
 
   return { apiKey, agentId, wsUrl, restUrl };
+}
+
+// =============================================================================
+// Reply Helper
+// =============================================================================
+
+/**
+ * Send a reply back to Thenvoi.
+ * Used by the dispatcher when OpenClaw agent responds.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendReplyToThenvoi(client: ThenvoiClient, roomId: string, payload: any): Promise<void> {
+  const text = typeof payload === "string" ? payload : payload?.text;
+  if (!text) {
+    console.warn("[thenvoi] No text in reply payload, skipping");
+    return;
+  }
+
+  try {
+    // Get participants for mention resolution
+    const participants = await client.getParticipants(roomId);
+    const agent = await client.getAgentMe();
+
+    // Find a participant to mention (prefer last sender, then any other)
+    const lastSender = lastSenderByThread.get(roomId);
+    let mentions: { id: string; name: string }[] = [];
+
+    if (lastSender) {
+      const senderParticipant = participants.find(
+        (p) => p.id === lastSender.senderId && p.id !== agent.id
+      );
+      if (senderParticipant) {
+        mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+      }
+    }
+
+    if (mentions.length === 0) {
+      const otherParticipant = participants.find((p) => p.id !== agent.id);
+      if (!otherParticipant) {
+        console.warn("[thenvoi] No participants to mention, skipping reply");
+        return;
+      }
+      mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
+    }
+
+    await client.sendMessage(roomId, text, mentions);
+    console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
+  } catch (error) {
+    console.error("[thenvoi] Failed to send reply:", error);
+  }
 }
 
 // =============================================================================
@@ -422,9 +488,73 @@ export const thenvoiChannel: OpenClawChannel = {
       const runtime = new ThenvoiRuntime(
         config,
         {
-          onMessage: (message) => {
-            if (deliverInbound) {
+          onMessage: async (message) => {
+            // Track sender for auto-mention fallback
+            if (message.threadId && message.senderId && message.senderName) {
+              lastSenderByThread.set(message.threadId, {
+                senderId: message.senderId,
+                senderName: message.senderName,
+              });
+            }
+
+            // Try OpenClaw dispatch first
+            if (openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
+              try {
+                // Format the inbound context matching OpenClaw's FinalizedMsgContext
+                const inboundCtx = {
+                  Body: message.text,
+                  RawBody: message.text,
+                  BodyForCommands: message.text,
+                  CommandBody: message.text,
+                  From: message.senderId,
+                  SenderId: message.senderId,
+                  SenderName: message.senderName,
+                  To: message.threadId,
+                  SessionKey: `thenvoi:${message.threadId}`,
+                  Surface: "thenvoi",
+                  Provider: "thenvoi",
+                  MessageSid: message.metadata?.messageId,
+                  Timestamp: message.timestamp ? new Date(message.timestamp).getTime() : Date.now(),
+                  ChatType: "group",
+                  CommandAuthorized: true,
+                };
+
+                // Create a dispatcher that sends replies via Thenvoi
+                const dispatcher = {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  sendToolResult: (payload: any): boolean => {
+                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    return true;
+                  },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  sendBlockReply: (payload: any): boolean => {
+                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    return true;
+                  },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  sendFinalReply: (payload: any): boolean => {
+                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    return true;
+                  },
+                  waitForIdle: async (): Promise<void> => Promise.resolve(),
+                  getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
+                };
+
+                console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
+                await openclawRuntime.channel.reply.dispatchReplyFromConfig({
+                  ctx: inboundCtx,
+                  cfg: openclawRuntime.config,
+                  dispatcher,
+                });
+                console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
+              } catch (error) {
+                console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
+              }
+            } else if (deliverInbound) {
+              // Fallback to legacy callback
               deliverInbound(message);
+            } else {
+              console.warn(`[thenvoi:${accountId}] No dispatch method available for inbound message`);
             }
           },
           onRoomJoined: (roomId, title) => {
