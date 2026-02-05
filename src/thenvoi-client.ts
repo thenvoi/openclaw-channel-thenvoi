@@ -161,7 +161,7 @@ export class ThenvoiClient {
   async getNextMessage(chatId?: string): Promise<NextMessageResponse | null> {
     try {
       const path = chatId
-        ? `/api/v1/agent/chats/${chatId}/next`
+        ? `/api/v1/agent/chats/${chatId}/messages/next`
         : `/api/v1/agent/messages/next`;
 
       const response = await this.request<{ data: NextMessageResponse | null } | NoMessageResponse>(
@@ -170,6 +170,11 @@ export class ThenvoiClient {
       );
 
       console.log(`[thenvoi] getNextMessage response:`, JSON.stringify(response, null, 2));
+
+      // Handle empty response (204 No Content or empty body)
+      if (response === undefined || response === null) {
+        return null;
+      }
 
       // Check if response indicates no messages
       if ("message" in response && response.message === "no_pending_messages") {

@@ -223,7 +223,7 @@ describe("ThenvoiClient", () => {
       await client.getNextMessage("room-001");
 
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://test.thenvoi.com/api/v1/agent/chats/room-001/next",
+        "https://test.thenvoi.com/api/v1/agent/chats/room-001/messages/next",
         expect.objectContaining({ method: "GET" }),
       );
     });
