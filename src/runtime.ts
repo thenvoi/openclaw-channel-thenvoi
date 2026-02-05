@@ -22,7 +22,7 @@ import type {
   ThenvoiConfig,
   ThenvoiEvent,
 } from "./types.js";
-import { ThenvoiConnectionError } from "./types.js";
+import { ThenvoiConnectionError, ThenvoiRateLimitError } from "./types.js";
 import { ThenvoiClient } from "./thenvoi-client.js";
 
 export interface RuntimeCallbacks {
@@ -67,6 +67,7 @@ export class ThenvoiRuntime {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
+  private rateLimitRetryAfterMs: number | null = null;
 
   private readonly reconnectConfig: ReconnectConfig = {
     baseDelayMs: 1000,
@@ -207,8 +208,16 @@ export class ThenvoiRuntime {
 
   /**
    * Calculate reconnection delay with exponential backoff and jitter.
+   * If rate limited, use the server-specified retry delay instead.
    */
   private calculateReconnectDelay(): number {
+    // If rate limited, use the server-specified delay
+    if (this.rateLimitRetryAfterMs !== null) {
+      const delay = this.rateLimitRetryAfterMs;
+      this.rateLimitRetryAfterMs = null; // Clear after use
+      return delay;
+    }
+
     const { baseDelayMs, maxDelayMs, multiplier, jitterFactor } =
       this.reconnectConfig;
 
@@ -233,6 +242,11 @@ export class ThenvoiRuntime {
       return;
     }
 
+    // Prevent concurrent reconnection attempts
+    if (this.reconnecting) {
+      return;
+    }
+
     if (this.reconnectAttempts >= this.reconnectConfig.maxAttempts) {
       const error = new ThenvoiConnectionError(
         `Max reconnection attempts (${this.reconnectConfig.maxAttempts}) exceeded`,
@@ -250,7 +264,14 @@ export class ThenvoiRuntime {
     this.reconnectTimer = setTimeout(async () => {
       try {
         await this.performReconnection();
-      } catch (_error) {
+      } catch (error) {
+        // If rate limited, use the server-specified delay for next attempt
+        if (error instanceof ThenvoiRateLimitError) {
+          console.log(`[thenvoi] Rate limited, will retry in ${Math.ceil(error.retryAfterMs / 1000)}s`);
+          this.rateLimitRetryAfterMs = error.retryAfterMs;
+        }
+        // Reset reconnecting flag to allow next attempt
+        this.reconnecting = false;
         // Schedule another attempt
         this.handleReconnection();
       }
