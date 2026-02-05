@@ -20,7 +20,7 @@ import type {
   SendMessageResponse,
   ThenvoiConfig,
 } from "./types.js";
-import { ThenvoiAuthError, ThenvoiError } from "./types.js";
+import { ThenvoiAuthError, ThenvoiError, ThenvoiRateLimitError } from "./types.js";
 
 export class ThenvoiClient {
   private readonly baseUrl: string;
@@ -340,6 +340,31 @@ export class ThenvoiClient {
     if (!response.ok) {
       if (response.status === 401) {
         throw new ThenvoiAuthError("Invalid API key");
+      }
+
+      if (response.status === 429) {
+        // Parse Retry-After header (can be seconds or HTTP date)
+        const retryAfter = response.headers.get("Retry-After");
+        let retryAfterMs = 60_000; // Default: 60 seconds
+
+        if (retryAfter) {
+          const seconds = parseInt(retryAfter, 10);
+          if (!isNaN(seconds)) {
+            retryAfterMs = seconds * 1000;
+          } else {
+            // Try parsing as HTTP date
+            const date = Date.parse(retryAfter);
+            if (!isNaN(date)) {
+              retryAfterMs = Math.max(0, date - Date.now());
+            }
+          }
+        }
+
+        console.log(`[thenvoi] Rate limited. Retry after ${retryAfterMs}ms`);
+        throw new ThenvoiRateLimitError(
+          `Rate limited. Retry after ${Math.ceil(retryAfterMs / 1000)}s`,
+          retryAfterMs,
+        );
       }
 
       const errorBody = await response.text();

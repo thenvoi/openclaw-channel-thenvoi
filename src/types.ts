@@ -362,6 +362,16 @@ export class ThenvoiAuthError extends ThenvoiError {
   }
 }
 
+export class ThenvoiRateLimitError extends ThenvoiError {
+  constructor(
+    message: string,
+    public readonly retryAfterMs: number,
+  ) {
+    super(message, "RATE_LIMIT", 429);
+    this.name = "ThenvoiRateLimitError";
+  }
+}
+
 // =============================================================================
 // Message Recovery Types
 // =============================================================================
