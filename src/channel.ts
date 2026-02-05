@@ -228,6 +228,33 @@ function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
 }
 
 // =============================================================================
+// Mention Resolution
+// =============================================================================
+
+/**
+ * Find participants mentioned in text using @Name pattern.
+ * Checks if "@<participant_name>" appears in the text for each participant.
+ *
+ * @param text - The message text to search
+ * @param participants - List of room participants
+ * @param agentId - Current agent's ID (excluded from results)
+ * @returns Array of mentioned participants with id and name
+ */
+function findMentionedParticipants(
+  text: string,
+  participants: Array<{ id: string; name: string }>,
+  agentId: string,
+): MentionRequest[] {
+  const mentioned: MentionRequest[] = [];
+  for (const p of participants) {
+    if (p.id !== agentId && text.includes(`@${p.name}`)) {
+      mentioned.push({ id: p.id, name: p.name });
+    }
+  }
+  return mentioned;
+}
+
+// =============================================================================
 // Reply Helper
 // =============================================================================
 
@@ -248,16 +275,19 @@ async function sendReplyToThenvoi(client: ThenvoiClient, roomId: string, payload
     const participants = await client.getParticipants(roomId);
     const agent = await client.getAgentMe();
 
-    // Find a participant to mention (prefer last sender, then any other)
-    const lastSender = lastSenderByThread.get(roomId);
-    let mentions: { id: string; name: string }[] = [];
+    // Find participants mentioned in text via @Name pattern
+    let mentions = findMentionedParticipants(text, participants, agent.id);
 
-    if (lastSender) {
-      const senderParticipant = participants.find(
-        (p) => p.id === lastSender.senderId && p.id !== agent.id
-      );
-      if (senderParticipant) {
-        mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+    // Fallback: prefer last sender, then any other participant
+    if (mentions.length === 0) {
+      const lastSender = lastSenderByThread.get(roomId);
+      if (lastSender) {
+        const senderParticipant = participants.find(
+          (p) => p.id === lastSender.senderId && p.id !== agent.id
+        );
+        if (senderParticipant) {
+          mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+        }
       }
     }
 
@@ -354,18 +384,19 @@ export const thenvoiChannel: OpenClawChannel = {
       const participants = await client.getParticipants(roomId);
       const agent = await client.getAgentMe();
 
-      // API requires at least 1 mention but you can't mention yourself
-      // Fallback: prefer the last sender (the person we're replying to)
-      let mentions: MentionRequest[] = [];
-      const lastSender = lastSenderByThread.get(roomId);
+      // Find participants mentioned in text via @Name pattern
+      let mentions: MentionRequest[] = findMentionedParticipants(text, participants, agent.id);
 
-      if (lastSender) {
-        // Find the last sender in participants to verify they're still in the room
-        const senderParticipant = participants.find(
-          (p) => p.id === lastSender.senderId && p.id !== agent.id
-        );
-        if (senderParticipant) {
-          mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+      // Fallback: prefer the last sender (the person we're replying to)
+      if (mentions.length === 0) {
+        const lastSender = lastSenderByThread.get(roomId);
+        if (lastSender) {
+          const senderParticipant = participants.find(
+            (p) => p.id === lastSender.senderId && p.id !== agent.id
+          );
+          if (senderParticipant) {
+            mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+          }
         }
       }
 
@@ -411,15 +442,19 @@ export const thenvoiChannel: OpenClawChannel = {
       const participants = await client.getParticipants(roomId);
       const agent = await client.getAgentMe();
 
-      let mentions: MentionRequest[] = [];
-      const lastSender = lastSenderByThread.get(roomId);
+      // Find participants mentioned in text via @Name pattern
+      let mentions: MentionRequest[] = findMentionedParticipants(messageText, participants, agent.id);
 
-      if (lastSender) {
-        const senderParticipant = participants.find(
-          (p) => p.id === lastSender.senderId && p.id !== agent.id
-        );
-        if (senderParticipant) {
-          mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+      // Fallback: prefer the last sender
+      if (mentions.length === 0) {
+        const lastSender = lastSenderByThread.get(roomId);
+        if (lastSender) {
+          const senderParticipant = participants.find(
+            (p) => p.id === lastSender.senderId && p.id !== agent.id
+          );
+          if (senderParticipant) {
+            mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
+          }
         }
       }
 
