@@ -33,3 +33,8 @@ coverage/
 
 openclaw
 e2e
+
+# Demo config (contains credentials)
+demo/openclaw-config-*/openclaw.json
+demo/openclaw-config-*/plugins/
+demo/openclaw-config-*/devices/
