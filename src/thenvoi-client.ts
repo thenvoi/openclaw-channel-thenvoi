@@ -6,18 +6,34 @@
  */
 
 import type {
+  AddContactResponse,
   AddParticipantResponse,
   AgentMetadata,
+  ArchiveMemoryResponse,
+  ContactRequestAction,
   CreateChatroomResponse,
   EventMessageType,
   EventMetadata,
+  GetMemoryResponse,
+  ListContactRequestsResponse,
+  ListContactsResponse,
+  ListMemoriesResponse,
   LookupPeersResponse,
   MentionRequest,
+  MemoryScope,
+  MemorySegment,
+  MemoryStatus,
+  MemorySystem,
+  MemoryType,
   NextMessageResponse,
   NoMessageResponse,
   Participant,
+  RemoveContactResponse,
+  RespondContactRequestResponse,
   SendEventResponse,
   SendMessageResponse,
+  StoreMemoryResponse,
+  SupersedeMemoryResponse,
   ThenvoiConfig,
 } from "./types.js";
 import { ThenvoiAuthError, ThenvoiError, ThenvoiRateLimitError } from "./types.js";
@@ -308,6 +324,258 @@ export class ThenvoiClient {
       total_count: 0, // metadata may have this
       has_more: false,
     };
+  }
+
+  // ===========================================================================
+  // Contacts API
+  // ===========================================================================
+
+  /**
+   * List agent's contacts with pagination.
+   */
+  async listContacts(
+    page: number = 1,
+    pageSize: number = 50,
+  ): Promise<ListContactsResponse> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+
+    const response = await this.request<{
+      data: ListContactsResponse["contacts"];
+      metadata: ListContactsResponse["metadata"];
+    }>("GET", `/api/v1/agent/contacts?${params}`);
+
+    return {
+      contacts: response.data || [],
+      metadata: response.metadata || {
+        page,
+        page_size: pageSize,
+        total_count: 0,
+        total_pages: 0,
+      },
+    };
+  }
+
+  /**
+   * Send a contact request to add someone as a contact.
+   *
+   * @param handle - Handle of user/agent to add (e.g., '@john' or '@john/agent-name')
+   * @param message - Optional message with the request
+   * @returns Status is 'pending' when request created, 'approved' when auto-accepted
+   */
+  async addContact(
+    handle: string,
+    message?: string,
+  ): Promise<AddContactResponse> {
+    const body: { handle: string; message?: string } = { handle };
+    if (message !== undefined) {
+      body.message = message;
+    }
+
+    const response = await this.request<{ data: AddContactResponse }>(
+      "POST",
+      "/api/v1/agent/contacts/add",
+      body,
+    );
+    return response.data;
+  }
+
+  /**
+   * Remove an existing contact by handle or ID.
+   *
+   * @param handle - Contact's handle (optional if contact_id provided)
+   * @param contactId - Contact record ID (optional if handle provided)
+   */
+  async removeContact(
+    handle?: string,
+    contactId?: string,
+  ): Promise<RemoveContactResponse> {
+    const body: { handle?: string; contact_id?: string } = {};
+    if (handle) body.handle = handle;
+    if (contactId) body.contact_id = contactId;
+
+    const response = await this.request<{ data: RemoveContactResponse }>(
+      "POST",
+      "/api/v1/agent/contacts/remove",
+      body,
+    );
+    return response.data;
+  }
+
+  /**
+   * List both received and sent contact requests.
+   *
+   * @param page - Page number (default 1)
+   * @param pageSize - Items per page per direction (default 50, max 100)
+   * @param sentStatus - Filter sent requests by status (default 'pending')
+   */
+  async listContactRequests(
+    page: number = 1,
+    pageSize: number = 50,
+    sentStatus: "pending" | "approved" | "rejected" | "cancelled" | "all" = "pending",
+  ): Promise<ListContactRequestsResponse> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      sent_status: sentStatus,
+    });
+
+    const response = await this.request<{
+      data: { received: ListContactRequestsResponse["received"]; sent: ListContactRequestsResponse["sent"] };
+      metadata: ListContactRequestsResponse["metadata"];
+    }>("GET", `/api/v1/agent/contacts/requests?${params}`);
+
+    return {
+      received: response.data?.received || [],
+      sent: response.data?.sent || [],
+      metadata: response.metadata || {
+        page,
+        page_size: pageSize,
+        received: { total: 0, total_pages: 0 },
+        sent: { total: 0, total_pages: 0 },
+      },
+    };
+  }
+
+  /**
+   * Respond to a contact request (approve, reject, or cancel).
+   *
+   * @param action - Action to take: 'approve'/'reject' for received, 'cancel' for sent
+   * @param handle - Other party's handle (optional if request_id provided)
+   * @param requestId - Request ID (optional if handle provided)
+   */
+  async respondContactRequest(
+    action: ContactRequestAction,
+    handle?: string,
+    requestId?: string,
+  ): Promise<RespondContactRequestResponse> {
+    const body: { action: ContactRequestAction; handle?: string; request_id?: string } = { action };
+    if (handle) body.handle = handle;
+    if (requestId) body.request_id = requestId;
+
+    const response = await this.request<{ data: RespondContactRequestResponse }>(
+      "POST",
+      "/api/v1/agent/contacts/requests/respond",
+      body,
+    );
+    return response.data;
+  }
+
+  // ===========================================================================
+  // Memories API
+  // ===========================================================================
+
+  /**
+   * List memories accessible to the agent.
+   */
+  async listMemories(options: {
+    subjectId?: string;
+    scope?: MemoryScope | "all";
+    system?: MemorySystem;
+    type?: MemoryType;
+    segment?: MemorySegment;
+    contentQuery?: string;
+    pageSize?: number;
+    status?: MemoryStatus | "all";
+  } = {}): Promise<ListMemoriesResponse> {
+    const params = new URLSearchParams();
+    if (options.subjectId) params.set("subject_id", options.subjectId);
+    if (options.scope) params.set("scope", options.scope);
+    if (options.system) params.set("system", options.system);
+    if (options.type) params.set("type", options.type);
+    if (options.segment) params.set("segment", options.segment);
+    if (options.contentQuery) params.set("content_query", options.contentQuery);
+    if (options.pageSize) params.set("page_size", options.pageSize.toString());
+    if (options.status) params.set("status", options.status);
+
+    const response = await this.request<{
+      data: ListMemoriesResponse["memories"];
+      meta: ListMemoriesResponse["metadata"];
+    }>("GET", `/api/v1/agent/memories?${params}`);
+
+    return {
+      memories: response.data || [],
+      metadata: response.meta || {
+        page_size: options.pageSize || 50,
+        total_count: 0,
+      },
+    };
+  }
+
+  /**
+   * Store a new memory entry.
+   */
+  async storeMemory(memory: {
+    content: string;
+    system: MemorySystem;
+    type: MemoryType;
+    segment: MemorySegment;
+    thought: string;
+    scope?: MemoryScope;
+    subjectId?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<StoreMemoryResponse> {
+    const body: Record<string, unknown> = {
+      memory: {
+        content: memory.content,
+        system: memory.system,
+        type: memory.type,
+        segment: memory.segment,
+        thought: memory.thought,
+        scope: memory.scope || "subject",
+      },
+    };
+
+    if (memory.subjectId) {
+      (body.memory as Record<string, unknown>).subject_id = memory.subjectId;
+    }
+    if (memory.metadata) {
+      (body.memory as Record<string, unknown>).metadata = memory.metadata;
+    }
+
+    const response = await this.request<{ data: StoreMemoryResponse }>(
+      "POST",
+      "/api/v1/agent/memories",
+      body,
+    );
+    return response.data;
+  }
+
+  /**
+   * Retrieve a specific memory by ID.
+   */
+  async getMemory(memoryId: string): Promise<GetMemoryResponse> {
+    const response = await this.request<{ data: GetMemoryResponse }>(
+      "GET",
+      `/api/v1/agent/memories/${encodeURIComponent(memoryId)}`,
+    );
+    return response.data;
+  }
+
+  /**
+   * Mark a memory as superseded (soft delete).
+   * Use when information is outdated or incorrect.
+   */
+  async supersedeMemory(memoryId: string): Promise<SupersedeMemoryResponse> {
+    const response = await this.request<{ data: SupersedeMemoryResponse }>(
+      "POST",
+      `/api/v1/agent/memories/${encodeURIComponent(memoryId)}/supersede`,
+    );
+    return response.data;
+  }
+
+  /**
+   * Archive a memory (hide but preserve).
+   * Use when memory is valid but not currently needed.
+   */
+  async archiveMemory(memoryId: string): Promise<ArchiveMemoryResponse> {
+    const response = await this.request<{ data: ArchiveMemoryResponse }>(
+      "POST",
+      `/api/v1/agent/memories/${encodeURIComponent(memoryId)}/archive`,
+    );
+    return response.data;
   }
 
   // ===========================================================================

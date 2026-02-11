@@ -1,0 +1,55 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "anthropic/claude-3-5-haiku-latest"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    }
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "gateway": {
+    "port": 18789,
+    "bind": "lan"
+  },
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/home/node/.openclaw/skills"
+      ]
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "load": {
+      "paths": [
+        "/home/node/.openclaw/plugins/thenvoi"
+      ]
+    },
+    "entries": {
+      "thenvoi": {
+        "enabled": true,
+        "config": {
+          "accounts": {
+            "default": {
+              "enabled": true,
+              "apiKey": "${THENVOI_API_KEY_2}",
+              "agentId": "${THENVOI_AGENT_ID_2}",
+              "wsUrl": "${THENVOI_WS_URL}",
+              "restUrl": "${THENVOI_REST_URL}"
+            }
+          }
+        }
+      }
+    }
+  }
+}

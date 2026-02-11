@@ -19,6 +19,11 @@ export interface ThenvoiAccountConfig {
   agentId?: string;
   wsUrl?: string;
   restUrl?: string;
+  /**
+   * Configuration for contact event handling.
+   * Only applicable when contactConfig.strategy is not "disabled".
+   */
+  contactConfig?: ContactEventConfig;
 }
 
 export interface ThenvoiChannelConfig {
@@ -426,3 +431,333 @@ export interface ReconnectConfig {
   /** Maximum number of reconnection attempts before giving up */
   maxAttempts: number;
 }
+
+// =============================================================================
+// Contact Event Strategy Types
+// =============================================================================
+
+/**
+ * Strategy for handling contact WebSocket events.
+ *
+ * - DISABLED: Ignore contact events (default). Use manual "check contacts" workflow.
+ * - CALLBACK: Programmatic handling via on_event callback. No LLM involvement.
+ * - HUB_ROOM: LLM reasoning in a dedicated hub room.
+ */
+export type ContactEventStrategy = "disabled" | "callback" | "hub_room";
+
+/**
+ * Callback type for contact event handling.
+ */
+export type ContactEventCallback = (event: ContactEvent) => void | Promise<void>;
+
+/**
+ * Configuration for contact event handling.
+ *
+ * Composable modes:
+ * - CALLBACK + broadcast_changes=true: Auto-handle + awareness everywhere
+ * - HUB_ROOM + broadcast_changes=true: LLM decides + awareness everywhere
+ * - DISABLED + broadcast_changes=true: Just awareness, manual handling
+ */
+export interface ContactEventConfig {
+  /**
+   * Strategy for handling contact events.
+   * @default "disabled"
+   */
+  strategy?: ContactEventStrategy;
+
+  /**
+   * For HUB_ROOM strategy: optional task_id (UUID) for the dedicated room.
+   * If undefined, creates a room without an associated task.
+   */
+  hubTaskId?: string;
+
+  /**
+   * For CALLBACK strategy: programmatic handler function.
+   * Required when strategy is "callback".
+   */
+  onEvent?: ContactEventCallback;
+
+  /**
+   * Broadcast contact changes to all room sessions.
+   *
+   * When true, contact_added/contact_removed events inject system messages
+   * into all active sessions, similar to participant updates.
+   * Works with any strategy (DISABLED, CALLBACK, HUB_ROOM).
+   *
+   * @default false
+   */
+  broadcastChanges?: boolean;
+}
+
+// =============================================================================
+// Contact Types
+// =============================================================================
+
+/**
+ * A contact in the agent's contact list.
+ */
+export interface Contact {
+  id: string;
+  handle: string;
+  name: string;
+  type: "User" | "Agent";
+  description?: string;
+  is_external?: boolean;
+  inserted_at?: string;
+}
+
+/**
+ * A contact request (sent or received).
+ */
+export interface ContactRequest {
+  id: string;
+  status: ContactRequestStatus;
+  message?: string;
+  inserted_at?: string;
+}
+
+/**
+ * Received contact request with requester info.
+ */
+export interface ReceivedContactRequest extends ContactRequest {
+  from_handle: string;
+  from_name: string;
+}
+
+/**
+ * Sent contact request with recipient info.
+ */
+export interface SentContactRequest extends ContactRequest {
+  to_handle: string;
+  to_name: string;
+}
+
+export type ContactRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export type ContactRequestAction = "approve" | "reject" | "cancel";
+
+// =============================================================================
+// Contact WebSocket Event Payloads
+// =============================================================================
+
+export interface ContactRequestReceivedPayload {
+  id: string;
+  from_handle: string;
+  from_name: string;
+  message?: string;
+  status: string;
+  inserted_at: string;
+}
+
+export interface ContactRequestUpdatedPayload {
+  id: string;
+  status: string;
+}
+
+export interface ContactAddedPayload {
+  id: string;
+  handle: string;
+  name: string;
+  type: "User" | "Agent";
+  description?: string;
+  is_external?: boolean;
+  inserted_at: string;
+}
+
+export interface ContactRemovedPayload {
+  id: string;
+}
+
+// =============================================================================
+// Contact REST API Response Types
+// =============================================================================
+
+export interface ListContactsResponse {
+  contacts: Contact[];
+  metadata: PaginationMetadata;
+}
+
+export interface AddContactResponse {
+  id: string;
+  status: "pending" | "approved";
+}
+
+export interface RemoveContactResponse {
+  status: "removed";
+}
+
+export interface ListContactRequestsResponse {
+  received: ReceivedContactRequest[];
+  sent: SentContactRequest[];
+  metadata: ContactRequestsMetadata;
+}
+
+export interface ContactRequestsMetadata {
+  page: number;
+  page_size: number;
+  received: { total: number; total_pages: number };
+  sent: { total: number; total_pages: number };
+}
+
+export interface RespondContactRequestResponse {
+  id: string;
+  status: string;
+}
+
+// =============================================================================
+// Contact MCP Tool Params
+// =============================================================================
+
+export interface ListContactsParams {
+  page?: number;
+  page_size?: number;
+}
+
+export interface AddContactParams {
+  handle: string;
+  message?: string;
+}
+
+export interface RemoveContactParams {
+  handle?: string;
+  contact_id?: string;
+}
+
+export interface ListContactRequestsParams {
+  page?: number;
+  page_size?: number;
+  sent_status?: "pending" | "approved" | "rejected" | "cancelled" | "all";
+}
+
+export interface RespondContactRequestParams {
+  action: ContactRequestAction;
+  handle?: string;
+  request_id?: string;
+}
+
+// =============================================================================
+// Memory Types
+// =============================================================================
+
+export type MemorySystem = "sensory" | "working" | "long_term";
+
+export type MemoryType = "iconic" | "echoic" | "haptic" | "episodic" | "semantic" | "procedural";
+
+export type MemorySegment = "user" | "agent" | "tool" | "guideline";
+
+export type MemoryScope = "subject" | "organization";
+
+export type MemoryStatus = "active" | "superseded" | "archived";
+
+/**
+ * A memory entry.
+ */
+export interface Memory {
+  id: string;
+  content: string;
+  system: MemorySystem;
+  type: MemoryType;
+  segment: MemorySegment;
+  scope: MemoryScope;
+  status: MemoryStatus;
+  thought: string;
+  subject_id?: string;
+  source_agent_id?: string;
+  metadata?: Record<string, unknown>;
+  inserted_at?: string;
+}
+
+// =============================================================================
+// Memory REST API Response Types
+// =============================================================================
+
+export interface ListMemoriesResponse {
+  memories: Memory[];
+  metadata: {
+    page_size: number;
+    total_count: number;
+  };
+}
+
+export interface StoreMemoryResponse {
+  id: string;
+  content: string;
+  system: MemorySystem;
+  type: MemoryType;
+  segment: MemorySegment;
+  scope: MemoryScope;
+  status: MemoryStatus;
+  thought: string;
+  inserted_at?: string;
+}
+
+export type GetMemoryResponse = Memory;
+
+export interface SupersedeMemoryResponse {
+  id: string;
+  status: "superseded";
+}
+
+export interface ArchiveMemoryResponse {
+  id: string;
+  status: "archived";
+}
+
+// =============================================================================
+// Memory MCP Tool Params
+// =============================================================================
+
+export interface ListMemoriesParams {
+  subject_id?: string;
+  scope?: MemoryScope | "all";
+  system?: MemorySystem;
+  type?: MemoryType;
+  segment?: MemorySegment;
+  content_query?: string;
+  page_size?: number;
+  status?: MemoryStatus | "all";
+}
+
+export interface StoreMemoryParams {
+  content: string;
+  system: MemorySystem;
+  type: MemoryType;
+  segment: MemorySegment;
+  thought: string;
+  scope?: MemoryScope;
+  subject_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface GetMemoryParams {
+  memory_id: string;
+}
+
+export interface SupersedeMemoryParams {
+  memory_id: string;
+}
+
+export interface ArchiveMemoryParams {
+  memory_id: string;
+}
+
+// =============================================================================
+// Common Types
+// =============================================================================
+
+export interface PaginationMetadata {
+  page: number;
+  page_size: number;
+  total_count: number;
+  total_pages: number;
+}
+
+// =============================================================================
+// Extended Event Types (with contacts)
+// =============================================================================
+
+export type ContactEvent =
+  | { type: "contact_request_received"; payload: ContactRequestReceivedPayload }
+  | { type: "contact_request_updated"; payload: ContactRequestUpdatedPayload }
+  | { type: "contact_added"; payload: ContactAddedPayload }
+  | { type: "contact_removed"; payload: ContactRemovedPayload };

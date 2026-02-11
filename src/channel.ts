@@ -6,6 +6,9 @@
  */
 
 import type {
+  ContactEvent,
+  ContactEventConfig,
+  ContactRequestReceivedPayload,
   MentionRequest,
   OpenClawInboundMessage,
   ThenvoiAccountConfig,
@@ -519,6 +522,34 @@ export const thenvoiChannel: OpenClawChannel = {
       clients.set(accountId, client);
       console.log(`[thenvoi:${accountId}] Client registered`);
 
+      // Auto-approve callback for contact requests
+      const autoApproveContacts = async (event: ContactEvent): Promise<void> => {
+        if (event.type === "contact_request_received") {
+          const payload = event.payload as ContactRequestReceivedPayload;
+          console.log(
+            `[thenvoi:${accountId}] Auto-approving contact request from ${payload.from_handle}`,
+          );
+          try {
+            await client.respondContactRequest("approve", undefined, payload.id);
+            console.log(
+              `[thenvoi:${accountId}] Contact request ${payload.id} approved`,
+            );
+          } catch (error) {
+            console.error(
+              `[thenvoi:${accountId}] Failed to approve contact request:`,
+              error,
+            );
+          }
+        }
+      };
+
+      // Contact event handling config with auto-approve
+      const contactConfig: ContactEventConfig = {
+        strategy: "callback",
+        onEvent: autoApproveContacts,
+        broadcastChanges: true,
+      };
+
       // Create and start runtime with client
       const runtime = new ThenvoiRuntime(
         config,
@@ -624,6 +655,7 @@ export const thenvoiChannel: OpenClawChannel = {
           },
         },
         client,
+        contactConfig,
       );
 
       await runtime.connect();
@@ -710,4 +742,11 @@ export function getClient(accountId: string = "default"): ThenvoiClient | undefi
  */
 export function getRuntime(accountId: string = "default"): ThenvoiRuntime | undefined {
   return runtimes.get(accountId);
+}
+
+/**
+ * Get the current agent's ID (UUID).
+ */
+export function getAgentId(accountId: string = "default"): string | undefined {
+  return runtimes.get(accountId)?.agentId;
 }
