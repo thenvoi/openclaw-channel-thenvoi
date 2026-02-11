@@ -31,7 +31,7 @@
  */
 
 import { registerChannel, thenvoiChannel, setInboundCallback, setOpenClawRuntime } from "./channel.js";
-import { getMcpToolSchemas } from "./mcp-tools.js";
+import { getMcpToolSchemas, executeMcpTool } from "./mcp-tools.js";
 import { BASE_INSTRUCTIONS } from "./prompts.js";
 
 // =============================================================================
@@ -95,23 +95,54 @@ export default function plugin(api: OpenClawPluginApi): void {
   // Register the channel (handles connection via gateway.startAccount/stopAccount)
   registerChannel(api);
 
-  // Register MCP tools if the API supports it
-  if (api.registerMcpTools) {
-    api.registerMcpTools(getMcpToolSchemas());
+  // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
+  const registerTool = (api as any).registerTool;
+  if (registerTool) {
+    const toolSchemas = getMcpToolSchemas();
+    console.log(`[thenvoi] Registering ${toolSchemas.length} tools:`, toolSchemas.map(t => t.name));
+    for (const tool of toolSchemas) {
+      registerTool({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+        // OpenClaw execute signature: (toolCallId: string, input: object) => AgentToolResult
+        // Result format: { content: [{ type: "text", text: "..." }], details: payload }
+        execute: async (_toolCallId: unknown, input: unknown) => {
+          console.log(`[thenvoi] Executing tool ${tool.name} with input:`, JSON.stringify(input));
+          try {
+            const result = await executeMcpTool(tool.name, input ?? {});
+            const resultStr = JSON.stringify(result, null, 2);
+            console.log(`[thenvoi] Tool ${tool.name} returned:`, resultStr);
+
+            // Return in OpenClaw's expected AgentToolResult format
+            return {
+              content: [{ type: "text", text: resultStr }],
+              details: result,
+            };
+          } catch (error) {
+            console.error(`[thenvoi] Tool ${tool.name} error:`, error);
+            throw error;
+          }
+        },
+      });
+    }
+    console.log("[thenvoi] Tools registered successfully");
+  } else {
+    console.warn("[thenvoi] WARNING: api.registerTool is not available - tools will NOT be registered!");
+    console.warn("[thenvoi] Available API methods:", Object.keys(api));
   }
 
   // Register before_agent_start hook to inject Thenvoi instructions
   // This ensures the LLM knows how to use thenvoi_send_message, thenvoi_send_event, etc.
+  // Instructions are injected for ALL messages since the agent should always know about
+  // Thenvoi tools (contacts, messaging, etc.) regardless of the message source.
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
-      // Only inject for Thenvoi channel messages
-      if (ctx.messageProvider === "thenvoi") {
-        console.log("[thenvoi] Injecting BASE_INSTRUCTIONS into agent context");
-        return {
-          prependContext: BASE_INSTRUCTIONS,
-        };
-      }
-      return undefined;
+      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
+      console.log("[thenvoi] Injecting BASE_INSTRUCTIONS into agent context");
+      return {
+        prependContext: BASE_INSTRUCTIONS,
+      };
     });
     console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
   }
@@ -143,7 +174,17 @@ export { ThenvoiClient } from "./thenvoi-client.js";
 export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";
 
 // Prompt exports
-export { BASE_INSTRUCTIONS, buildSystemPrompt } from "./prompts.js";
+export {
+  BASE_INSTRUCTIONS,
+  CORE_INSTRUCTIONS,
+  CONTACT_INSTRUCTIONS,
+  HUB_ROOM_SYSTEM_PROMPT,
+  buildSystemPrompt,
+} from "./prompts.js";
+
+// Contact handler exports
+export { ContactEventHandler } from "./contact-handler.js";
+export type { HubEventCallback, HubInitCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
 
 // Type exports
 export type {
@@ -151,6 +192,15 @@ export type {
   ThenvoiConfig,
   ThenvoiAccountConfig,
   ThenvoiChannelConfig,
+  // Contact event configuration
+  ContactEventStrategy,
+  ContactEventConfig,
+  ContactEventCallback,
+  ContactEvent,
+  ContactRequestReceivedPayload,
+  ContactRequestUpdatedPayload,
+  ContactAddedPayload,
+  ContactRemovedPayload,
   // Messages
   MessageCreatedPayload,
   MessageMetadata,

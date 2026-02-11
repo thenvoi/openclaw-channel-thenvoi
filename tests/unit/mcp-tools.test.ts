@@ -40,8 +40,8 @@ describe("MCP Tools", () => {
   });
 
   describe("mcpTools array", () => {
-    it("should contain 7 tools", () => {
-      expect(mcpTools).toHaveLength(7);
+    it("should contain 17 tools", () => {
+      expect(mcpTools).toHaveLength(17);
     });
 
     it("should have unique tool names", () => {
@@ -81,7 +81,7 @@ describe("MCP Tools", () => {
     it("should return schemas without handlers", () => {
       const schemas = getMcpToolSchemas();
 
-      expect(schemas).toHaveLength(7);
+      expect(schemas).toHaveLength(17);
       schemas.forEach((schema) => {
         expect(schema).toHaveProperty("name");
         expect(schema).toHaveProperty("description");

@@ -9,6 +9,12 @@ import { Socket, Channel } from "phoenix";
 import WebSocket from "ws";
 
 import type {
+  ContactAddedPayload,
+  ContactEvent,
+  ContactEventConfig,
+  ContactRemovedPayload,
+  ContactRequestReceivedPayload,
+  ContactRequestUpdatedPayload,
   MessageCreatedPayload,
   NextMessageResponse,
   OpenClawInboundMessage,
@@ -24,6 +30,7 @@ import type {
 } from "./types.js";
 import { ThenvoiConnectionError, ThenvoiRateLimitError } from "./types.js";
 import { ThenvoiClient } from "./thenvoi-client.js";
+import { ContactEventHandler } from "./contact-handler.js";
 
 export interface RuntimeCallbacks {
   onMessage: (message: OpenClawInboundMessage) => void;
@@ -39,6 +46,11 @@ export interface RuntimeCallbacks {
   onSyncStarted?: () => void;
   onSyncCompleted?: (messageCount: number) => void;
   onSyncError?: (error: Error) => void;
+  // Contact callbacks
+  onContactRequestReceived?: (payload: ContactRequestReceivedPayload) => void;
+  onContactRequestUpdated?: (payload: ContactRequestUpdatedPayload) => void;
+  onContactAdded?: (payload: ContactAddedPayload) => void;
+  onContactRemoved?: (payload: ContactRemovedPayload) => void;
 }
 
 export class ThenvoiRuntime {
@@ -48,6 +60,7 @@ export class ThenvoiRuntime {
 
   private socket: Socket | null = null;
   private agentChannel: Channel | null = null;
+  private contactsChannel: Channel | null = null;
   private rooms: Map<string, RoomState> = new Map();
   private roomChannels: Map<string, { chat: Channel; participants: Channel }> =
     new Map();
@@ -77,14 +90,28 @@ export class ThenvoiRuntime {
     maxAttempts: 10,
   };
 
+  // Contact event handling
+  private contactEventHandler: ContactEventHandler | null = null;
+  private readonly contactConfig: ContactEventConfig;
+  private pendingContactBroadcasts: string[] = [];
+
+  /**
+   * Get the agent's own ID (UUID).
+   */
+  get agentId(): string {
+    return this.config.agentId;
+  }
+
   constructor(
     config: ThenvoiConfig,
     callbacks: RuntimeCallbacks,
     client?: ThenvoiClient,
+    contactConfig?: ContactEventConfig,
   ) {
     this.config = config;
     this.callbacks = callbacks;
     this.client = client ?? new ThenvoiClient(config);
+    this.contactConfig = contactConfig ?? { strategy: "disabled" };
   }
 
   // ===========================================================================
@@ -102,17 +129,21 @@ export class ThenvoiRuntime {
     this.intentionalDisconnect = false;
 
     return new Promise((resolve, reject) => {
+      const socketParams = {
+        api_key: this.config.apiKey,
+        agent_id: this.config.agentId,
+      };
+      console.log(`[thenvoi] Connecting to WebSocket: ${this.config.wsUrl}`);
+      console.log(`[thenvoi] Socket params:`, JSON.stringify(socketParams));
       this.socket = new Socket(this.config.wsUrl, {
-        params: {
-          api_key: this.config.apiKey,
-          agent_id: this.config.agentId,
-        },
+        params: () => socketParams,
         transport: WebSocket as any,
       } as any);
 
       this.setupSocketHandlers();
 
       this.socket.onOpen(async () => {
+        console.log("[thenvoi] WebSocket connection opened");
         try {
           this.connected = true;
           this.reconnecting = false;
@@ -120,6 +151,12 @@ export class ThenvoiRuntime {
 
           // Join agent channel
           await this.joinAgentChannel();
+
+          // Join contacts channel
+          await this.joinContactsChannel();
+
+          // Set up contact event handling
+          await this.setupContactHandling();
 
           // Fetch and join existing rooms
           await this.joinExistingRooms();
@@ -134,9 +171,13 @@ export class ThenvoiRuntime {
       });
 
       this.socket.onError((error: unknown) => {
-        const err = new ThenvoiConnectionError(
-          `WebSocket error: ${String(error)}`,
-        );
+        const errorStr =
+          error instanceof Error
+            ? error.message
+            : typeof error === "object"
+              ? JSON.stringify(error)
+              : String(error);
+        const err = new ThenvoiConnectionError(`WebSocket error: ${errorStr}`);
         this.callbacks.onError?.(err);
         if (!this.connected) {
           reject(err);
@@ -166,6 +207,10 @@ export class ThenvoiRuntime {
       this.roomChannels.delete(roomId);
     }
 
+    // Leave contacts channel
+    this.contactsChannel?.leave();
+    this.contactsChannel = null;
+
     // Leave agent channel
     this.agentChannel?.leave();
     this.agentChannel = null;
@@ -191,6 +236,7 @@ export class ThenvoiRuntime {
     if (!this.socket) return;
 
     this.socket.onClose(() => {
+      console.log("[thenvoi] WebSocket connection closed");
       this.connected = false;
 
       if (!this.intentionalDisconnect) {
@@ -288,16 +334,18 @@ export class ThenvoiRuntime {
     // Reset connection state
     this.socket = null;
     this.agentChannel = null;
+    this.contactsChannel = null;
     this.roomChannels.clear();
     this.syncPointMessageId = null; // Reset sync point for new sync
     this.pendingWsMessages = []; // Clear pending queue for fresh sync
 
     // Create new socket
+    const socketParams = {
+      api_key: this.config.apiKey,
+      agent_id: this.config.agentId,
+    };
     this.socket = new Socket(this.config.wsUrl, {
-      params: {
-        api_key: this.config.apiKey,
-        agent_id: this.config.agentId,
-      },
+      params: () => socketParams,
       transport: WebSocket as any,
     } as any);
 
@@ -315,6 +363,9 @@ export class ThenvoiRuntime {
 
     // Join agent channel
     await this.joinAgentChannel();
+
+    // Join contacts channel
+    await this.joinContactsChannel();
 
     // Synchronize with backlog
     await this.synchronizeWithBacklog();
@@ -711,6 +762,66 @@ export class ThenvoiRuntime {
   }
 
   /**
+   * Join the contacts channel for contact events.
+   */
+  private async joinContactsChannel(): Promise<void> {
+    if (!this.socket) {
+      throw new ThenvoiConnectionError("Socket not connected");
+    }
+
+    const topic = `agent_contacts:${this.config.agentId}`;
+    this.contactsChannel = this.socket.channel(topic, {});
+
+    // Contact lifecycle events
+    this.contactsChannel.on("contact_request_received", (payload) => {
+      this.handleContactEvent({
+        type: "contact_request_received",
+        payload: payload as ContactRequestReceivedPayload,
+      });
+    });
+
+    this.contactsChannel.on("contact_request_updated", (payload) => {
+      this.handleContactEvent({
+        type: "contact_request_updated",
+        payload: payload as ContactRequestUpdatedPayload,
+      });
+    });
+
+    this.contactsChannel.on("contact_added", (payload) => {
+      this.handleContactEvent({
+        type: "contact_added",
+        payload: payload as ContactAddedPayload,
+      });
+    });
+
+    this.contactsChannel.on("contact_removed", (payload) => {
+      this.handleContactEvent({
+        type: "contact_removed",
+        payload: payload as ContactRemovedPayload,
+      });
+    });
+
+    return new Promise((resolve) => {
+      this.contactsChannel!.join()
+        .receive("ok", () => {
+          console.log(`[thenvoi] Joined contacts channel: ${topic}`);
+          resolve();
+        })
+        .receive("error", (reason: unknown) => {
+          // Don't fail if contacts channel is not available (platform may not support it yet)
+          console.warn(`[thenvoi] Could not join contacts channel: ${reason}`);
+          this.contactsChannel = null;
+          resolve();
+        })
+        .receive("timeout", () => {
+          console.warn("[thenvoi] Timeout joining contacts channel");
+          this.contactsChannel = null;
+          resolve();
+        });
+    });
+  }
+
+  /**
    * Fetch existing rooms from the API and join them.
    */
   private async joinExistingRooms(): Promise<void> {
@@ -985,5 +1096,195 @@ export class ThenvoiRuntime {
     }
 
     this.callbacks.onParticipantLeft?.(roomId, payload.name);
+  }
+
+  // ===========================================================================
+  // Contact Event Handling
+  // ===========================================================================
+
+  /**
+   * Set up contact event handling based on config.
+   */
+  private async setupContactHandling(): Promise<void> {
+    const strategy = this.contactConfig.strategy ?? "disabled";
+
+    if (strategy === "disabled" && !this.contactConfig.broadcastChanges) {
+      console.log("[thenvoi] Contact handling disabled");
+      return;
+    }
+
+    // Create handler with callbacks
+    this.contactEventHandler = new ContactEventHandler({
+      config: this.contactConfig,
+      client: this.client,
+      onBroadcast: this.contactConfig.broadcastChanges
+        ? (msg) => this.queueContactBroadcast(msg)
+        : undefined,
+      onHubEvent: strategy === "hub_room"
+        ? (roomId, payload) => this.injectHubEvent(roomId, payload)
+        : undefined,
+      onHubInit: strategy === "hub_room"
+        ? (roomId, prompt) => this.injectHubSystemPrompt(roomId, prompt)
+        : undefined,
+    });
+
+    // For HUB_ROOM strategy, create hub room at startup
+    if (strategy === "hub_room") {
+      const hubRoomId = await this.contactEventHandler.initializeHubRoom();
+      console.log(`[thenvoi] Hub room initialized: ${hubRoomId}`);
+    }
+
+    console.log(
+      `[thenvoi] Contact handling enabled: strategy=${strategy}, broadcast=${this.contactConfig.broadcastChanges ?? false}`,
+    );
+
+    // Process any pending contact requests on startup
+    if (strategy === "callback" && this.contactConfig.onEvent) {
+      await this.processPendingContactRequests();
+    }
+  }
+
+  /**
+   * Fetch and process pending contact requests on startup.
+   * This handles requests that arrived before the agent was running.
+   */
+  private async processPendingContactRequests(): Promise<void> {
+    try {
+      console.log("[thenvoi] Checking for pending contact requests...");
+      const response = await this.client.listContactRequests(1, 100, "pending");
+
+      const pendingReceived = response.received || [];
+      if (pendingReceived.length === 0) {
+        console.log("[thenvoi] No pending contact requests to process");
+        return;
+      }
+
+      console.log(`[thenvoi] Found ${pendingReceived.length} pending contact requests`);
+
+      // Process each pending request through the callback
+      for (const request of pendingReceived) {
+        console.log(`[thenvoi] Processing pending request from ${request.from_handle} (${request.id})`);
+
+        // Create a synthetic contact event for the callback
+        const event: ContactEvent = {
+          type: "contact_request_received",
+          payload: {
+            id: request.id,
+            from_handle: request.from_handle,
+            from_name: request.from_name,
+            message: request.message,
+            status: request.status,
+            inserted_at: request.inserted_at ?? new Date().toISOString(),
+          },
+        };
+
+        // Call the configured callback
+        try {
+          await this.contactConfig.onEvent!(event);
+        } catch (error) {
+          console.error(`[thenvoi] Error processing pending request ${request.id}:`, error);
+        }
+      }
+
+      console.log(`[thenvoi] Finished processing ${pendingReceived.length} pending contact requests`);
+    } catch (error) {
+      console.error("[thenvoi] Error fetching pending contact requests:", error);
+    }
+  }
+
+  /**
+   * Queue a broadcast message for contact changes.
+   */
+  private queueContactBroadcast(message: string): void {
+    this.pendingContactBroadcasts.push(message);
+  }
+
+  /**
+   * Inject a message event into the hub room.
+   */
+  private async injectHubEvent(roomId: string, payload: MessageCreatedPayload): Promise<void> {
+    // Convert to OpenClaw message and deliver
+    const message: OpenClawInboundMessage = {
+      channelId: "thenvoi",
+      threadId: roomId,
+      senderId: payload.sender_id,
+      senderType: payload.sender_type,
+      senderName: payload.sender_name,
+      text: payload.content,
+      timestamp: payload.inserted_at,
+      metadata: {
+        messageId: payload.id,
+        isContactEvent: true,
+      },
+    };
+
+    this.callbacks.onMessage(message);
+  }
+
+  /**
+   * Inject system prompt into the hub room.
+   */
+  private async injectHubSystemPrompt(roomId: string, prompt: string): Promise<void> {
+    // Send as a system message to the hub room
+    const message: OpenClawInboundMessage = {
+      channelId: "thenvoi",
+      threadId: roomId,
+      senderId: "system",
+      senderType: "System",
+      senderName: "System",
+      text: prompt,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        isSystemPrompt: true,
+      },
+    };
+
+    this.callbacks.onMessage(message);
+  }
+
+  /**
+   * Get pending contact broadcasts and clear the queue.
+   */
+  getPendingContactBroadcasts(): string[] {
+    const messages = [...this.pendingContactBroadcasts];
+    this.pendingContactBroadcasts = [];
+    return messages;
+  }
+
+  /**
+   * Get contact event handler statistics.
+   */
+  getContactHandlerStats(): Record<string, unknown> | null {
+    return this.contactEventHandler?.getStats() ?? null;
+  }
+
+  private handleContactEvent(event: ContactEvent): void {
+    console.log(`[thenvoi] Contact event: ${event.type}`, event.payload);
+
+    // Route through ContactEventHandler if configured
+    if (this.contactEventHandler) {
+      this.contactEventHandler.handle(event).catch((error) => {
+        console.error("[thenvoi] Error handling contact event:", error);
+      });
+    }
+
+    // Also call the legacy callbacks for backwards compatibility
+    switch (event.type) {
+      case "contact_request_received":
+        this.callbacks.onContactRequestReceived?.(event.payload);
+        break;
+
+      case "contact_request_updated":
+        this.callbacks.onContactRequestUpdated?.(event.payload);
+        break;
+
+      case "contact_added":
+        this.callbacks.onContactAdded?.(event.payload);
+        break;
+
+      case "contact_removed":
+        this.callbacks.onContactRemoved?.(event.payload);
+        break;
+    }
   }
 }

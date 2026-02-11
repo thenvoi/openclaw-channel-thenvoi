@@ -1,4 +1,6 @@
-# OpenClaw + Thenvoi Channel - Secure Docker Compose
+# OpenClaw + Thenvoi Channel - Multi-Agent Docker Compose
+#
+# Runs two OpenClaw agents connecting to local Thenvoi platform
 #
 # Prerequisites:
 #   1. Clone OpenClaw: git clone https://github.com/openclaw/openclaw.git
@@ -9,10 +11,12 @@
 version: '3.8'
 
 services:
-  openclaw-thenvoi:
-    # Built from official OpenClaw source
+  # ═══════════════════════════════════════════════════════════════════
+  # Agent 1 - @amit.gazal/openclaw1
+  # ═══════════════════════════════════════════════════════════════════
+  openclaw-agent-1:
     image: openclaw:local
-    container_name: openclaw-thenvoi-agent
+    container_name: openclaw-thenvoi-agent-1
     restart: unless-stopped
 
     # === SECURITY HARDENING ===
@@ -29,7 +33,7 @@ services:
     cpus: 2
     pids_limit: 100
 
-    # === NETWORK (localhost only) ===
+    # === NETWORK ===
     ports:
       - "127.0.0.1:18789:18789"
     networks:
@@ -37,9 +41,7 @@ services:
 
     # === VOLUMES ===
     volumes:
-      # Main openclaw config directory
-      - ./openclaw-config:/home/node/.openclaw:rw
-      # Thenvoi plugin (read-only)
+      - ./openclaw-config-1:/home/node/.openclaw:rw
       - ./plugins/thenvoi:/home/node/.openclaw/plugins/thenvoi:ro
 
     tmpfs:
@@ -49,19 +51,82 @@ services:
     # === ENVIRONMENT ===
     environment:
       - NODE_ENV=production
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN_1}
       - OPENCLAW_GATEWAY_BIND=lan
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - THENVOI_API_KEY=${THENVOI_API_KEY}
-      - THENVOI_AGENT_ID=${THENVOI_AGENT_ID}
-      - THENVOI_WS_URL=${THENVOI_WS_URL:-wss://app.thenvoi.com/api/v1/socket}
-      - THENVOI_REST_URL=${THENVOI_REST_URL:-https://app.thenvoi.com}
+      - THENVOI_API_KEY=${THENVOI_API_KEY_1}
+      - THENVOI_AGENT_ID=${THENVOI_AGENT_ID_1}
+      - THENVOI_WS_URL=${THENVOI_WS_URL}
+      - THENVOI_REST_URL=${THENVOI_REST_URL}
       - OPENCLAW_PLUGINS=/home/node/.openclaw/plugins
 
     # === HEALTH CHECK ===
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:18789/health", "-H", "Authorization: Bearer ${OPENCLAW_GATEWAY_TOKEN}"]
+      test: ["CMD", "curl", "-sf", "http://localhost:18789/health", "-H", "Authorization: Bearer ${OPENCLAW_GATEWAY_TOKEN_1}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # === LOGGING ===
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Agent 2 - @amit.gazal/openclaw2
+  # ═══════════════════════════════════════════════════════════════════
+  openclaw-agent-2:
+    image: openclaw:local
+    container_name: openclaw-thenvoi-agent-2
+    restart: unless-stopped
+
+    # === SECURITY HARDENING ===
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+    # === RESOURCE LIMITS ===
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 2
+    pids_limit: 100
+
+    # === NETWORK ===
+    ports:
+      - "127.0.0.1:18790:18789"
+    networks:
+      - openclaw-isolated
+
+    # === VOLUMES ===
+    volumes:
+      - ./openclaw-config-2:/home/node/.openclaw:rw
+      - ./plugins/thenvoi:/home/node/.openclaw/plugins/thenvoi:ro
+
+    tmpfs:
+      - /tmp:size=100M,mode=1777,uid=1000,gid=1000
+      - /home/node/.cache:size=200M,mode=755,uid=1000,gid=1000
+
+    # === ENVIRONMENT ===
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN_2}
+      - OPENCLAW_GATEWAY_BIND=lan
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - THENVOI_API_KEY=${THENVOI_API_KEY_2}
+      - THENVOI_AGENT_ID=${THENVOI_AGENT_ID_2}
+      - THENVOI_WS_URL=${THENVOI_WS_URL}
+      - THENVOI_REST_URL=${THENVOI_REST_URL}
+      - OPENCLAW_PLUGINS=/home/node/.openclaw/plugins
+
+    # === HEALTH CHECK ===
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18789/health", "-H", "Authorization: Bearer ${OPENCLAW_GATEWAY_TOKEN_2}"]
       interval: 30s
       timeout: 10s
       retries: 3
