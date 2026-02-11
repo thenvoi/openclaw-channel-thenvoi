@@ -21,6 +21,7 @@ import {
 // Mock the channel module
 vi.mock("../../src/channel.js", () => ({
   getClient: vi.fn(),
+  getAgentId: vi.fn(),
 }));
 
 describe("MCP Tools", () => {
@@ -37,6 +38,8 @@ describe("MCP Tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(channel.getClient).mockReturnValue(mockClient as unknown as ReturnType<typeof channel.getClient>);
+    // Mock getAgentId to return our test agent ID (used by send_message to exclude self from mentions)
+    vi.mocked(channel.getAgentId).mockReturnValue("agent-123");
   });
 
   describe("mcpTools array", () => {
@@ -129,7 +132,9 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_add_participant", () => {
-    it("should call addParticipant with default role", async () => {
+    it("should lookup peer and call addParticipant with UUID", async () => {
+      // The tool now looks up the peer by name to get the UUID
+      mockClient.lookupPeers.mockResolvedValue(mockLookupPeersResponse);
       mockClient.addParticipant.mockResolvedValue(mockAddParticipantResponse);
 
       const result = await executeMcpTool("thenvoi_add_participant", {
@@ -137,9 +142,12 @@ describe("MCP Tools", () => {
         name: "Weather Agent",
       });
 
+      // First it should lookup peers
+      expect(mockClient.lookupPeers).toHaveBeenCalledWith(1, 100);
+      // Then call addParticipant with the UUID from the lookup
       expect(mockClient.addParticipant).toHaveBeenCalledWith(
         "room-001",
-        "Weather Agent",
+        "agent-weather", // UUID from mockLookupPeersResponse
         "member",
       );
       expect(result).toHaveProperty("success", true);
@@ -147,6 +155,15 @@ describe("MCP Tools", () => {
     });
 
     it("should call addParticipant with provided role", async () => {
+      // Add an admin user to the peers response for this test
+      const peersWithAdmin = {
+        ...mockLookupPeersResponse,
+        peers: [
+          ...mockLookupPeersResponse.peers,
+          { id: "user-admin", name: "Admin User", type: "User" as const, status: "online" as const },
+        ],
+      };
+      mockClient.lookupPeers.mockResolvedValue(peersWithAdmin);
       mockClient.addParticipant.mockResolvedValue(mockAddParticipantResponse);
 
       await executeMcpTool("thenvoi_add_participant", {
@@ -157,9 +174,20 @@ describe("MCP Tools", () => {
 
       expect(mockClient.addParticipant).toHaveBeenCalledWith(
         "room-001",
-        "Admin User",
+        "user-admin", // UUID from lookup
         "admin",
       );
+    });
+
+    it("should throw when peer not found", async () => {
+      mockClient.lookupPeers.mockResolvedValue(mockLookupPeersResponse);
+
+      await expect(
+        executeMcpTool("thenvoi_add_participant", {
+          room_id: "room-001",
+          name: "Unknown User",
+        }),
+      ).rejects.toThrow('Peer not found: "Unknown User"');
     });
 
     it("should throw when client not connected", async () => {
