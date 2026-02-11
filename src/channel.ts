@@ -607,9 +607,10 @@ export const thenvoiChannel: OpenClawChannel = {
                 };
 
                 console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
+                const cfg = openclawRuntime.config.loadConfig();
                 await openclawRuntime.channel.reply.dispatchReplyFromConfig({
                   ctx: inboundCtx,
-                  cfg: openclawRuntime.config,
+                  cfg,
                   dispatcher,
                 });
                 console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
