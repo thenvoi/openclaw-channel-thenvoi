@@ -48,6 +48,7 @@ interface McpProperty {
   description: string;
   default?: unknown;
   enum?: string[];
+  items?: { type: string };
 }
 
 // =============================================================================
@@ -357,6 +358,7 @@ const sendMessageTool: McpTool = {
       },
       mentions: {
         type: "array",
+        items: { type: "string" },
         description:
           "List of participant names to @mention. At least one required. " +
           "Use thenvoi_get_participants to see available participants.",
