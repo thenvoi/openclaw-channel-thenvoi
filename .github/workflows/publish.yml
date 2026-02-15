@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # Required for npm provenance
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +48,6 @@ jobs:
             echo "should_publish=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Publish to npm
+      - name: Publish to npm with provenance
         if: steps.check.outputs.should_publish == 'true'
         run: npm publish --access public --provenance
