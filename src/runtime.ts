@@ -6,7 +6,7 @@
  */
 
 import { Socket, Channel } from "phoenix";
-import WebSocket from "ws";
+import { RateLimitAwareWebSocket } from "./rate-limit-websocket.js";
 
 import type {
   ContactAddedPayload,
@@ -137,7 +137,7 @@ export class ThenvoiRuntime {
       console.log(`[thenvoi] Socket params:`, JSON.stringify(socketParams));
       this.socket = new Socket(this.config.wsUrl, {
         params: () => socketParams,
-        transport: WebSocket as any,
+        transport: RateLimitAwareWebSocket as any,
       } as any);
 
       this.setupSocketHandlers();
@@ -171,6 +171,17 @@ export class ThenvoiRuntime {
       });
 
       this.socket.onError((error: unknown) => {
+        // Check if underlying transport detected rate limiting
+        const conn = (this.socket as any)?.conn as
+          | RateLimitAwareWebSocket
+          | undefined;
+        if (conn?.rateLimitRetryAfterMs) {
+          this.rateLimitRetryAfterMs = conn.rateLimitRetryAfterMs;
+          console.log(
+            `[thenvoi] Rate limit detected, will wait ${this.rateLimitRetryAfterMs}ms before reconnect`,
+          );
+        }
+
         const errorStr =
           error instanceof Error
             ? error.message
@@ -238,6 +249,17 @@ export class ThenvoiRuntime {
     this.socket.onClose(() => {
       console.log("[thenvoi] WebSocket connection closed");
       this.connected = false;
+
+      // Check if rate limited before triggering reconnection
+      const conn = (this.socket as any)?.conn as
+        | RateLimitAwareWebSocket
+        | undefined;
+      if (conn?.rateLimitRetryAfterMs) {
+        this.rateLimitRetryAfterMs = conn.rateLimitRetryAfterMs;
+        console.log(
+          `[thenvoi] Rate limit detected on close, will wait ${this.rateLimitRetryAfterMs}ms`,
+        );
+      }
 
       if (!this.intentionalDisconnect) {
         this.callbacks.onError?.(
@@ -346,7 +368,7 @@ export class ThenvoiRuntime {
     };
     this.socket = new Socket(this.config.wsUrl, {
       params: () => socketParams,
-      transport: WebSocket as any,
+      transport: RateLimitAwareWebSocket as any,
     } as any);
 
     // Set up socket handlers
