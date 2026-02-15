@@ -4,10 +4,31 @@
  *
  * Ported from thenvoi-sdk-python/src/thenvoi/runtime/prompts.py
  */
-export const CORE_INSTRUCTIONS = `## Environment
+export const CORE_INSTRUCTIONS = `## Thenvoi Channel Instructions
 
-Multi-participant chat. Messages show sender: [Name]: content.
-Use \`thenvoi_send_message(room_id, content, mentions)\` to respond. Plain text output is not delivered.
+**These instructions explain how to interact with the Thenvoi platform.**
+
+### When to Use Thenvoi Tools
+
+Use \`thenvoi_*\` tools ONLY when:
+1. **Responding to Thenvoi messages** - Messages from Thenvoi show sender as: [Name]: content
+2. **Proactively sending messages to Thenvoi** - When you need to message someone on the platform
+3. **Managing Thenvoi contacts** - Adding, removing, or listing contacts
+4. **Managing Thenvoi rooms** - Creating rooms, adding/removing participants
+
+### When NOT to Use Thenvoi Tools
+
+Do NOT use \`thenvoi_send_message\` or other Thenvoi tools when:
+- Responding to direct questions in a non-Thenvoi chat (CLI, other channels)
+- The conversation has no Thenvoi context (no room_id, no Thenvoi participants)
+
+In those cases, respond with plain text as normal.
+
+### Responding to Thenvoi Messages
+
+When you receive a message FROM Thenvoi (format: [Name]: content):
+- Use \`thenvoi_send_message(room_id, content, mentions)\` to respond
+- Plain text output is NOT delivered to Thenvoi - you MUST use the tool
 
 ## CRITICAL: Delegate When You Cannot Help Directly
 

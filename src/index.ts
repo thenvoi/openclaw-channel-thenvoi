@@ -133,16 +133,26 @@ export default function plugin(api: OpenClawPluginApi): void {
   }
 
   // Register before_agent_start hook to inject Thenvoi instructions
-  // This ensures the LLM knows how to use thenvoi_send_message, thenvoi_send_event, etc.
-  // Instructions are injected for ALL messages since the agent should always know about
-  // Thenvoi tools (contacts, messaging, etc.) regardless of the message source.
+  // Only inject instructions when the message comes from Thenvoi channel
+  // This prevents the agent from trying to use Thenvoi tools when chatting via other channels
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
       console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      console.log("[thenvoi] Injecting BASE_INSTRUCTIONS into agent context");
-      return {
-        prependContext: BASE_INSTRUCTIONS,
-      };
+
+      // Only inject Thenvoi instructions for messages from the Thenvoi channel
+      // Check for both "thenvoi" and "openclaw-channel-thenvoi" (the full channel ID)
+      const isFromThenvoi = ctx.messageProvider === "thenvoi" ||
+                            ctx.messageProvider === "openclaw-channel-thenvoi";
+
+      if (isFromThenvoi) {
+        console.log("[thenvoi] Message from Thenvoi channel - injecting BASE_INSTRUCTIONS");
+        return {
+          prependContext: BASE_INSTRUCTIONS,
+        };
+      } else {
+        console.log("[thenvoi] Message NOT from Thenvoi channel - skipping instruction injection");
+        return {};
+      }
     });
     console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
   }
@@ -169,6 +179,9 @@ export type { RuntimeCallbacks } from "./runtime.js";
 
 // Client exports
 export { ThenvoiClient } from "./thenvoi-client.js";
+
+// WebSocket exports
+export { RateLimitAwareWebSocket } from "./rate-limit-websocket.js";
 
 // MCP tool exports
 export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";

@@ -28,8 +28,8 @@ describe("Channel Module", () => {
 
   describe("thenvoiChannel.meta", () => {
     it("should have correct metadata", () => {
-      expect(thenvoiChannel.id).toBe("thenvoi");
-      expect(thenvoiChannel.meta.id).toBe("thenvoi");
+      expect(thenvoiChannel.id).toBe("openclaw-channel-thenvoi");
+      expect(thenvoiChannel.meta.id).toBe("openclaw-channel-thenvoi");
       expect(thenvoiChannel.meta.label).toBe("Thenvoi");
       expect(thenvoiChannel.meta.aliases).toContain("thenvoi");
     });

@@ -7,8 +7,14 @@ import { BASE_INSTRUCTIONS, buildSystemPrompt } from "../../src/prompts.js";
 
 describe("Prompts", () => {
   describe("BASE_INSTRUCTIONS", () => {
-    it("should contain environment section", () => {
-      expect(BASE_INSTRUCTIONS).toContain("## Environment");
+    it("should contain channel instructions section", () => {
+      expect(BASE_INSTRUCTIONS).toContain("## Thenvoi Channel Instructions");
+    });
+
+    it("should clarify when to use Thenvoi tools", () => {
+      expect(BASE_INSTRUCTIONS).toContain("When to Use Thenvoi Tools");
+      expect(BASE_INSTRUCTIONS).toContain("When NOT to Use Thenvoi Tools");
+      expect(BASE_INSTRUCTIONS).toContain("Do NOT use `thenvoi_send_message`");
     });
 
     it("should contain delegation instructions", () => {
@@ -49,7 +55,7 @@ describe("Prompts", () => {
     it("should include base instructions", () => {
       const prompt = buildSystemPrompt("Test Agent", "a test agent");
 
-      expect(prompt).toContain("## Environment");
+      expect(prompt).toContain("## Thenvoi Channel Instructions");
       expect(prompt).toContain("lookup_peers");
     });
 
@@ -74,7 +80,7 @@ describe("Prompts", () => {
 
       const identityIndex = prompt.indexOf("You are Test Agent");
       const customIndex = prompt.indexOf("CUSTOM_MARKER");
-      const baseIndex = prompt.indexOf("## Environment");
+      const baseIndex = prompt.indexOf("## Thenvoi Channel Instructions");
 
       expect(identityIndex).toBeLessThan(customIndex);
       expect(customIndex).toBeLessThan(baseIndex);
@@ -84,7 +90,7 @@ describe("Prompts", () => {
       const prompt = buildSystemPrompt("Test Agent", "a test agent");
 
       expect(prompt).toContain("You are Test Agent");
-      expect(prompt).toContain("## Environment");
+      expect(prompt).toContain("## Thenvoi Channel Instructions");
       expect(prompt).not.toContain("undefined");
     });
 
