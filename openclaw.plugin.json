@@ -1,8 +1,8 @@
 {
   "$schema": "https://openclaw.ai/schemas/plugin.json",
-  "id": "thenvoi",
+  "id": "openclaw-channel-thenvoi",
   "name": "Thenvoi",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Connect OpenClaw to the Thenvoi AI agent collaboration platform",
   "author": "Thenvoi",
   "license": "MIT",
@@ -11,7 +11,7 @@
   "type": "channel",
 
   "openclaw.channel": {
-    "id": "thenvoi",
+    "id": "openclaw-channel-thenvoi",
     "label": "Thenvoi",
     "selectionLabel": "Thenvoi (AI Collaboration)",
     "docsPath": "/channels/thenvoi",

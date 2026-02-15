@@ -118,10 +118,18 @@ interface PluginConfig {
     thenvoi?: {
       accounts?: Record<string, ThenvoiAccountConfig>;
     };
+    "openclaw-channel-thenvoi"?: {
+      accounts?: Record<string, ThenvoiAccountConfig>;
+    };
   };
   plugins?: {
     entries?: {
       thenvoi?: {
+        config?: {
+          accounts?: Record<string, ThenvoiAccountConfig>;
+        };
+      };
+      "openclaw-channel-thenvoi"?: {
         config?: {
           accounts?: Record<string, ThenvoiAccountConfig>;
         };
@@ -315,15 +323,15 @@ async function sendReplyToThenvoi(client: ThenvoiClient, roomId: string, payload
 // =============================================================================
 
 export const thenvoiChannel: OpenClawChannel = {
-  id: "thenvoi",
+  id: "openclaw-channel-thenvoi",
 
   meta: {
-    id: "thenvoi",
+    id: "openclaw-channel-thenvoi",
     label: "Thenvoi",
     selectionLabel: "Thenvoi (AI Collaboration)",
     docsPath: "/channels/thenvoi",
     blurb: "Connect to the Thenvoi AI agent collaboration platform.",
-    aliases: ["thenvoi"],
+    aliases: ["thenvoi", "openclaw-channel-thenvoi"],
   },
 
   capabilities: {
@@ -333,9 +341,11 @@ export const thenvoiChannel: OpenClawChannel = {
 
   config: {
     listAccountIds: (config: PluginConfig): string[] => {
-      // Check both plugin config and channels config
-      const pluginAccounts = config.plugins?.entries?.thenvoi?.config?.accounts ?? {};
-      const channelAccounts = config.channels?.thenvoi?.accounts ?? {};
+      // Check both plugin config and channels config (support both old "thenvoi" and new "openclaw-channel-thenvoi" keys)
+      const pluginAccounts = config.plugins?.entries?.["openclaw-channel-thenvoi"]?.config?.accounts
+        ?? config.plugins?.entries?.thenvoi?.config?.accounts ?? {};
+      const channelAccounts = config.channels?.["openclaw-channel-thenvoi"]?.accounts
+        ?? config.channels?.thenvoi?.accounts ?? {};
       const accounts = { ...pluginAccounts, ...channelAccounts };
       return Object.keys(accounts);
     },
@@ -344,9 +354,11 @@ export const thenvoiChannel: OpenClawChannel = {
       config: PluginConfig,
       accountId?: string,
     ): ThenvoiAccountConfig => {
-      // Check both plugin config and channels config
-      const pluginAccounts = config.plugins?.entries?.thenvoi?.config?.accounts ?? {};
-      const channelAccounts = config.channels?.thenvoi?.accounts ?? {};
+      // Check both plugin config and channels config (support both old "thenvoi" and new "openclaw-channel-thenvoi" keys)
+      const pluginAccounts = config.plugins?.entries?.["openclaw-channel-thenvoi"]?.config?.accounts
+        ?? config.plugins?.entries?.thenvoi?.config?.accounts ?? {};
+      const channelAccounts = config.channels?.["openclaw-channel-thenvoi"]?.accounts
+        ?? config.channels?.thenvoi?.accounts ?? {};
       const accounts = { ...pluginAccounts, ...channelAccounts };
       const account = accounts[accountId ?? "default"] ?? { enabled: true };
       return account;

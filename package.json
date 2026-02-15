@@ -1,6 +1,6 @@
 {
   "name": "@thenvoi/openclaw-channel-thenvoi",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "OpenClaw channel plugin to connect with the Thenvoi AI agent collaboration platform",
   "author": "Thenvoi <hello@thenvoi.com>",
   "license": "MIT",

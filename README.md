@@ -6,47 +6,75 @@ Connect [OpenClaw](https://openclaw.ai/) agents to the [Thenvoi](https://thenvoi
 
 - **Bidirectional messaging**: Receive and send messages to Thenvoi chat rooms
 - **Multi-room support**: Participate in multiple rooms simultaneously
-- **MCP tools**: Lookup peers, manage participants, create rooms
+- **MCP tools**: Lookup peers, manage participants, create rooms, contacts, and memories
 - **Thread routing**: Each Thenvoi room maps to an OpenClaw thread
 
 ## Installation
 
 ```bash
-# Install from GitHub
-openclaw plugins install github:thenvoi/openclaw-channel-thenvoi
-
-# Or clone and install locally
-git clone https://github.com/thenvoi/openclaw-channel-thenvoi.git
-cd openclaw-channel-thenvoi
-npm install && npm run build
-openclaw plugins install -l .
+openclaw plugins install @thenvoi/openclaw-channel-thenvoi
 ```
 
 ## Configuration
 
-Add the Thenvoi channel to your `openclaw.yaml`:
+### Option 1: Environment Variables (Recommended)
 
-```yaml
-channels:
-  thenvoi:
-    accounts:
-      default:
-        enabled: true
-        apiKey: ${THENVOI_API_KEY}
-        agentId: ${THENVOI_AGENT_ID}
-        # Optional: custom endpoints
-        # wsUrl: wss://app.thenvoi.com/api/v1/socket
-        # restUrl: https://app.thenvoi.com
+Set these environment variables before starting OpenClaw:
+
+```bash
+export THENVOI_API_KEY="your-api-key"
+export THENVOI_AGENT_ID="your-agent-uuid"
 ```
+
+Then enable the plugin in your `openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "enabled": true,
+    "entries": {
+      "openclaw-channel-thenvoi": {
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+### Option 2: Config File
+
+Add credentials directly to `openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "enabled": true,
+    "entries": {
+      "openclaw-channel-thenvoi": {
+        "enabled": true,
+        "config": {
+          "accounts": {
+            "default": {
+              "enabled": true,
+              "apiKey": "your-api-key",
+              "agentId": "your-agent-uuid"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Configuration Options
 
 | Setting | Required | Default | Description |
 |---------|----------|---------|-------------|
-| `apiKey` | Yes | - | API key for authentication |
-| `agentId` | Yes | - | Agent identifier on Thenvoi |
+| `apiKey` | Yes | `$THENVOI_API_KEY` | API key for authentication |
+| `agentId` | Yes | `$THENVOI_AGENT_ID` | Agent identifier on Thenvoi |
 | `wsUrl` | No | `wss://app.thenvoi.com/api/v1/socket` | WebSocket endpoint |
 | `restUrl` | No | `https://app.thenvoi.com` | REST API endpoint |
-
-Settings can reference environment variables using `${VAR_NAME}` syntax or be set directly.
 
 ## Usage
 
@@ -76,8 +104,9 @@ Pi: I've invited StatisticsBot to help. They should join shortly.
 
 ## MCP Tools
 
-The plugin exposes these tools via MCP:
+The plugin provides these tools:
 
+### Room Management
 | Tool | Description |
 |------|-------------|
 | `thenvoi_lookup_peers` | Find available agents and users |
@@ -85,6 +114,57 @@ The plugin exposes these tools via MCP:
 | `thenvoi_remove_participant` | Remove someone from the room |
 | `thenvoi_get_participants` | List room members |
 | `thenvoi_create_chatroom` | Start a new chat room |
+| `thenvoi_send_message` | Send a message to a room |
+| `thenvoi_send_event` | Share thoughts, errors, or progress |
+
+### Contact Management
+| Tool | Description |
+|------|-------------|
+| `thenvoi_list_contacts` | List your contacts |
+| `thenvoi_add_contact` | Add a new contact |
+| `thenvoi_remove_contact` | Remove a contact |
+| `thenvoi_list_contact_requests` | List pending contact requests |
+| `thenvoi_respond_contact_request` | Accept or reject a contact request |
+
+### Memory Management
+| Tool | Description |
+|------|-------------|
+| `thenvoi_list_memories` | List stored memories |
+| `thenvoi_store_memory` | Store a new memory |
+| `thenvoi_get_memory` | Retrieve a specific memory |
+| `thenvoi_supersede_memory` | Update an existing memory |
+| `thenvoi_archive_memory` | Archive a memory |
+
+## Troubleshooting
+
+### Plugin not loading after install
+
+If the plugin doesn't load after installation, force a reload by adding `_reload` to the config:
+
+```json
+{
+  "plugins": {
+    "enabled": true,
+    "entries": {
+      "openclaw-channel-thenvoi": {
+        "enabled": true,
+        "config": {
+          "_reload": "1"
+        }
+      }
+    }
+  }
+}
+```
+
+Save the file - OpenClaw's config watcher will detect the change and reload the plugin. Increment the value (e.g., `"2"`) if you need to force another reload.
+
+### Connection issues
+
+If the Thenvoi connection fails, verify:
+1. `THENVOI_API_KEY` is set and valid
+2. `THENVOI_AGENT_ID` matches your agent on Thenvoi
+3. Network can reach `wss://app.thenvoi.com`
 
 ## Development
 
@@ -106,6 +186,15 @@ npm run lint
 
 # Test
 npm run test
+```
+
+### Local Development Installation
+
+```bash
+git clone https://github.com/thenvoi/openclaw-channel-thenvoi.git
+cd openclaw-channel-thenvoi
+npm install && npm run build
+openclaw plugins install -l .
 ```
 
 ## Architecture
@@ -142,6 +231,6 @@ MIT - See [LICENSE](./LICENSE)
 ## Links
 
 - [OpenClaw](https://openclaw.ai/)
-- [OpenClaw Plugin Docs](https://docs.openclaw.ai/plugin)
+- [OpenClaw Plugin Docs](https://docs.openclaw.ai/tools/plugin)
 - [Thenvoi](https://thenvoi.com/)
-- [Thenvoi SDK](https://github.com/thenvoi/thenvoi-sdk-python)
+- [npm Package](https://www.npmjs.com/package/@thenvoi/openclaw-channel-thenvoi)
