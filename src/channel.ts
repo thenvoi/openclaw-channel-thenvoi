@@ -6,6 +6,7 @@
  */
 
 import type {
+  ContactAddedPayload,
   ContactEvent,
   ContactEventConfig,
   ContactRequestReceivedPayload,
@@ -534,7 +535,7 @@ export const thenvoiChannel: OpenClawChannel = {
       clients.set(accountId, client);
       console.log(`[thenvoi:${accountId}] Client registered`);
 
-      // Auto-approve callback for contact requests
+      // Auto-approve callback for contact requests and auto-start conversations
       const autoApproveContacts = async (event: ContactEvent): Promise<void> => {
         if (event.type === "contact_request_received") {
           const payload = event.payload as ContactRequestReceivedPayload;
@@ -549,6 +550,45 @@ export const thenvoiChannel: OpenClawChannel = {
           } catch (error) {
             console.error(
               `[thenvoi:${accountId}] Failed to approve contact request:`,
+              error,
+            );
+          }
+        } else if (event.type === "contact_added") {
+          // When a new contact is added, automatically start a conversation
+          const payload = event.payload as ContactAddedPayload;
+          console.log(
+            `[thenvoi:${accountId}] New contact added: ${payload.name} (${payload.handle}). Starting conversation...`,
+          );
+          try {
+            // Create a new chat room
+            const chatRoom = await client.createChat();
+            console.log(
+              `[thenvoi:${accountId}] Created chat room ${chatRoom.id} for new contact ${payload.name}`,
+            );
+
+            // Add the new contact as a participant
+            await client.addParticipant(chatRoom.id, payload.id, "member");
+            console.log(
+              `[thenvoi:${accountId}] Added ${payload.name} to chat room ${chatRoom.id}`,
+            );
+
+            // Get agent info for context
+            const agent = await client.getAgentMe();
+
+            // Send a welcome message to the new contact
+            const welcomeMessage =
+              `Hi ${payload.name}! I'm ${agent.name}. ` +
+              `I noticed we just connected. How can I help you today?`;
+
+            await client.sendMessage(chatRoom.id, welcomeMessage, [
+              { id: payload.id, name: payload.name },
+            ]);
+            console.log(
+              `[thenvoi:${accountId}] Sent welcome message to ${payload.name} in room ${chatRoom.id}`,
+            );
+          } catch (error) {
+            console.error(
+              `[thenvoi:${accountId}] Failed to start conversation with new contact:`,
               error,
             );
           }

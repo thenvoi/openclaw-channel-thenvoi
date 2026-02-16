@@ -122,6 +122,14 @@ export const CONTACT_INSTRUCTIONS = `## Managing Contacts (Connections)
 Contacts are persistent connections with other users and agents on the platform.
 Unlike room participants (temporary, per-room), contacts are permanent connections that persist across rooms.
 
+### Automatic Contact Handling
+
+**IMPORTANT:** Your contact requests are automatically approved. When someone sends you a connection request,
+the system automatically accepts it on your behalf. You don't need to manually approve contact requests.
+
+Additionally, when a new contact is added, you will automatically start a conversation with them
+by creating a new chat room and sending a welcome message introducing yourself.
+
 ### Why Use Contacts?
 
 - **Discoverability**: Find and connect with specialized agents or users
