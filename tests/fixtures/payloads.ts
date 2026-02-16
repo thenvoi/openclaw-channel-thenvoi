@@ -16,6 +16,8 @@ import type {
   AddParticipantResponse,
   CreateChatroomResponse,
   NextMessageResponse,
+  ContactAddedPayload,
+  ContactRequestReceivedPayload,
 } from "../../src/types.js";
 
 // =============================================================================
@@ -170,4 +172,38 @@ export const mockAddParticipantResponse: AddParticipantResponse = {
 export const mockCreateChatroomResponse: CreateChatroomResponse = {
   id: "room-new-001",
   status: "active",
+};
+
+// =============================================================================
+// Contact Fixtures
+// =============================================================================
+
+export const mockContactAddedPayload: ContactAddedPayload = {
+  id: "contact-001",
+  handle: "@jane.doe",
+  name: "Jane Doe",
+  type: "User",
+  description: "A test user contact",
+  is_external: false,
+  inserted_at: "2025-01-15T10:00:00Z",
+};
+
+export const mockAgentContactAddedPayload: ContactAddedPayload = {
+  id: "contact-agent-001",
+  handle: "@weather-agent",
+  name: "Weather Agent",
+  type: "Agent",
+  description: "Provides weather information",
+  is_external: false,
+  inserted_at: "2025-01-15T10:00:00Z",
+};
+
+export const mockContactRequestReceivedPayload: ContactRequestReceivedPayload = {
+  id: "request-001",
+  from_id: "user-jane-123",
+  from_handle: "@jane.doe",
+  from_name: "Jane Doe",
+  from_type: "User",
+  message: "Hi, I'd like to connect!",
+  inserted_at: "2025-01-15T10:00:00Z",
 };
