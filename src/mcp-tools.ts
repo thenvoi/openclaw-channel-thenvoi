@@ -90,6 +90,7 @@ const lookupPeersTool: McpTool = {
     const result = {
       peers: response.peers.map((peer) => ({
         id: peer.id,
+        handle: peer.handle,
         name: peer.name,
         type: peer.type,
         description: peer.description,
@@ -145,8 +146,11 @@ const addParticipantTool: McpTool = {
 
     // Lookup the peer to validate it exists and get canonical handle
     const peersResponse = await client.lookupPeers(1, 100);
+    const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
     const peer = peersResponse.peers.find(
-      (p) =>p.name.toLowerCase() === handle.toLowerCase()
+      (p) =>
+        p.name.toLowerCase() === normalizedHandle ||
+        p.handle?.toLowerCase() === normalizedHandle
     );
 
     if (!peer) {

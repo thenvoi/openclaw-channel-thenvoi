@@ -574,12 +574,15 @@ export const thenvoiChannel: OpenClawChannel = {
             console.log(`[thenvoi:${accountId}] Looking up peers...`);
             const peersResponse = await client.lookupPeers(1, 100);
             console.log(`[thenvoi:${accountId}] Found ${peersResponse.peers.length} peers:`,
-              peersResponse.peers.map(p => ({ id: p.id, name: p.name })));
+              peersResponse.peers.map(p => ({ id: p.id, name: p.name, handle: p.handle })));
 
+            const normalizedName = payload.name.replace(/^@/, "").toLowerCase();
             const peer = peersResponse.peers.find(
-              (p) => p.name.toLowerCase() === payload.name.toLowerCase()
+              (p) =>
+                p.name.toLowerCase() === normalizedName ||
+                p.handle?.toLowerCase() === normalizedName
             );
-            console.log(`[thenvoi:${accountId}] Looking for peer with name "${payload.name}", found:`, peer);
+            console.log(`[thenvoi:${accountId}] Looking for peer with name/handle "${payload.name}", found:`, peer);
 
             if (!peer) {
               throw new Error(`Peer not found for contact: ${payload.name}. Available peers: ${peersResponse.peers.map(p => p.name).join(', ')}`);
