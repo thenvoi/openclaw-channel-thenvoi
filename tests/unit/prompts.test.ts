@@ -11,33 +11,37 @@ describe("Prompts", () => {
       expect(BASE_INSTRUCTIONS).toContain("## Thenvoi Channel Instructions");
     });
 
-    it("should clarify when to use Thenvoi tools", () => {
-      expect(BASE_INSTRUCTIONS).toContain("When to Use Thenvoi Tools");
-      expect(BASE_INSTRUCTIONS).toContain("When NOT to Use Thenvoi Tools");
-      expect(BASE_INSTRUCTIONS).toContain("Do NOT use `thenvoi_send_message`");
+    it("should explain two operating contexts", () => {
+      expect(BASE_INSTRUCTIONS).toContain("Webchat/CLI context");
+      expect(BASE_INSTRUCTIONS).toContain("Thenvoi room context");
+    });
+
+    it("should mention plain text auto-routing", () => {
+      expect(BASE_INSTRUCTIONS).toContain("automatically routed");
+      expect(BASE_INSTRUCTIONS).toContain("plain text");
+    });
+
+    it("should list tools that work without room_id", () => {
+      expect(BASE_INSTRUCTIONS).toContain("thenvoi_lookup_peers");
+      expect(BASE_INSTRUCTIONS).toContain("thenvoi_add_contact");
+      expect(BASE_INSTRUCTIONS).toContain("thenvoi_create_chatroom");
+    });
+
+    it("should list tools that require room_id", () => {
+      expect(BASE_INSTRUCTIONS).toContain("thenvoi_send_message");
+      expect(BASE_INSTRUCTIONS).toContain("thenvoi_send_event");
+      expect(BASE_INSTRUCTIONS).toContain("thenvoi_add_participant");
     });
 
     it("should contain delegation instructions", () => {
-      expect(BASE_INSTRUCTIONS).toContain("CRITICAL: Delegate");
+      expect(BASE_INSTRUCTIONS).toContain("Delegating to Other Agents");
       expect(BASE_INSTRUCTIONS).toContain("lookup_peers");
       expect(BASE_INSTRUCTIONS).toContain("add_participant");
     });
 
-    it("should contain thinking instructions", () => {
-      expect(BASE_INSTRUCTIONS).toContain("send_event");
-      expect(BASE_INSTRUCTIONS).toContain("thought");
-    });
-
     it("should contain examples", () => {
-      expect(BASE_INSTRUCTIONS).toContain("## Examples");
-    });
-
-    it("should not remove agents automatically", () => {
-      expect(BASE_INSTRUCTIONS).toContain("Do NOT Remove Agents Automatically");
-    });
-
-    it("should relay information back", () => {
-      expect(BASE_INSTRUCTIONS).toContain("Relay Information Back");
+      expect(BASE_INSTRUCTIONS).toContain("Example:");
+      expect(BASE_INSTRUCTIONS).toContain("Webchat");
     });
   });
 

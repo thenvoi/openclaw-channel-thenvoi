@@ -9,21 +9,16 @@ import { getClient, getAgentId } from "./channel.js";
 import type {
   AddContactParams,
   AddParticipantParams,
-  ArchiveMemoryParams,
   CreateChatroomParams,
-  GetMemoryParams,
   GetParticipantsParams,
   ListContactRequestsParams,
   ListContactsParams,
-  ListMemoriesParams,
   LookupPeersParams,
   RemoveContactParams,
   RemoveParticipantParams,
   RespondContactRequestParams,
   SendEventParams,
   SendMessageParams,
-  StoreMemoryParams,
-  SupersedeMemoryParams,
 } from "./types.js";
 
 // =============================================================================
@@ -90,6 +85,7 @@ const lookupPeersTool: McpTool = {
     const result = {
       peers: response.peers.map((peer) => ({
         id: peer.id,
+        handle: peer.handle,
         name: peer.name,
         type: peer.type,
         description: peer.description,
@@ -120,9 +116,11 @@ const addParticipantTool: McpTool = {
         type: "string",
         description: "The ID of the room to add the participant to",
       },
-      name: {
+      handle: {
         type: "string",
-        description: "Name of the agent or user to invite",
+        description:
+          "Handle of the agent or user to invite (e.g., '@john' or '@john/agent-name'). " +
+          "Can also be a name or UUID.",
       },
       role: {
         type: "string",
@@ -131,24 +129,29 @@ const addParticipantTool: McpTool = {
         enum: ["owner", "admin", "member"],
       },
     },
-    required: ["room_id", "name"],
+    required: ["room_id", "handle"],
   },
   handler: async (params: unknown) => {
-    const { room_id, name, role = "member" } = params as AddParticipantParams;
+    const { room_id, handle, role = "member" } = params as AddParticipantParams;
     const client = getClient();
 
     if (!client) {
       throw new Error("Thenvoi client not connected");
     }
 
-    // The API requires participant_id (UUID), so we need to lookup the peer by name first
+    // Lookup the peer to validate it exists and get canonical handle
     const peersResponse = await client.lookupPeers(1, 100);
+    const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
     const peer = peersResponse.peers.find(
-      (p) => p.name.toLowerCase() === name.toLowerCase() || p.id === name
+      (p) =>
+        p.name.toLowerCase() === normalizedHandle ||
+        p.handle?.toLowerCase() === normalizedHandle
     );
 
     if (!peer) {
-      throw new Error(`Peer not found: "${name}". Use thenvoi_lookup_peers to see available peers.`);
+      throw new Error(
+        `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
+      );
     }
 
     const response = await client.addParticipant(room_id, peer.id, role);
@@ -648,297 +651,6 @@ const respondContactRequestTool: McpTool = {
 };
 
 // =============================================================================
-// Tool: thenvoi_list_memories
-// =============================================================================
-
-const listMemoriesTool: McpTool = {
-  name: "thenvoi_list_memories",
-  description:
-    "List memories accessible to the agent. " +
-    "Returns memories about the specified subject (cross-agent sharing) " +
-    "and organization-wide shared memories.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      subject_id: {
-        type: "string",
-        description: "Filter by subject UUID (required for subject-scoped queries)",
-      },
-      scope: {
-        type: "string",
-        description: "Filter by scope",
-        enum: ["subject", "organization", "all"],
-      },
-      system: {
-        type: "string",
-        description: "Filter by memory system",
-        enum: ["sensory", "working", "long_term"],
-      },
-      type: {
-        type: "string",
-        description: "Filter by memory type",
-        enum: ["iconic", "echoic", "haptic", "episodic", "semantic", "procedural"],
-      },
-      segment: {
-        type: "string",
-        description: "Filter by segment",
-        enum: ["user", "agent", "tool", "guideline"],
-      },
-      content_query: {
-        type: "string",
-        description: "Full-text search query",
-      },
-      page_size: {
-        type: "number",
-        description: "Number of results per page (default: 50, max: 50)",
-        default: 50,
-      },
-      status: {
-        type: "string",
-        description: "Filter by status",
-        enum: ["active", "superseded", "archived", "all"],
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const p = params as ListMemoriesParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.listMemories({
-      subjectId: p.subject_id,
-      scope: p.scope,
-      system: p.system,
-      type: p.type,
-      segment: p.segment,
-      contentQuery: p.content_query,
-      pageSize: p.page_size,
-      status: p.status,
-    });
-
-    return {
-      memories: response.memories.map((m) => ({
-        id: m.id,
-        content: m.content,
-        system: m.system,
-        type: m.type,
-        segment: m.segment,
-        scope: m.scope,
-        status: m.status,
-        thought: m.thought,
-        subject_id: m.subject_id,
-      })),
-      metadata: response.metadata,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_store_memory
-// =============================================================================
-
-const storeMemoryTool: McpTool = {
-  name: "thenvoi_store_memory",
-  description:
-    "Store a new memory entry. " +
-    "The memory will be associated with the authenticated agent as the source. " +
-    "For subject-scoped memories, provide a subject_id. " +
-    "For organization-scoped memories, omit subject_id.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      content: {
-        type: "string",
-        description: "The memory content",
-      },
-      system: {
-        type: "string",
-        description: "Memory system tier",
-        enum: ["sensory", "working", "long_term"],
-      },
-      type: {
-        type: "string",
-        description: "Memory type (must be valid for selected system)",
-        enum: ["iconic", "echoic", "haptic", "episodic", "semantic", "procedural"],
-      },
-      segment: {
-        type: "string",
-        description: "Logical segment",
-        enum: ["user", "agent", "tool", "guideline"],
-      },
-      thought: {
-        type: "string",
-        description: "Agent's reasoning for storing this memory",
-      },
-      scope: {
-        type: "string",
-        description: "Visibility scope (default: subject)",
-        default: "subject",
-        enum: ["subject", "organization"],
-      },
-      subject_id: {
-        type: "string",
-        description: "UUID of the subject this memory is about (required for subject scope)",
-      },
-      metadata: {
-        type: "object",
-        description: "Additional metadata (tags, references)",
-      },
-    },
-    required: ["content", "system", "type", "segment", "thought"],
-  },
-  handler: async (params: unknown) => {
-    const p = params as StoreMemoryParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.storeMemory({
-      content: p.content,
-      system: p.system,
-      type: p.type,
-      segment: p.segment,
-      thought: p.thought,
-      scope: p.scope,
-      subjectId: p.subject_id,
-      metadata: p.metadata,
-    });
-
-    return {
-      success: true,
-      id: response.id,
-      status: response.status,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_get_memory
-// =============================================================================
-
-const getMemoryTool: McpTool = {
-  name: "thenvoi_get_memory",
-  description: "Retrieve a specific memory by ID.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      memory_id: {
-        type: "string",
-        description: "Memory ID (UUID)",
-      },
-    },
-    required: ["memory_id"],
-  },
-  handler: async (params: unknown) => {
-    const { memory_id } = params as GetMemoryParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const memory = await client.getMemory(memory_id);
-
-    return {
-      id: memory.id,
-      content: memory.content,
-      system: memory.system,
-      type: memory.type,
-      segment: memory.segment,
-      scope: memory.scope,
-      status: memory.status,
-      thought: memory.thought,
-      subject_id: memory.subject_id,
-      source_agent_id: memory.source_agent_id,
-      inserted_at: memory.inserted_at,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_supersede_memory
-// =============================================================================
-
-const supersedeMemoryTool: McpTool = {
-  name: "thenvoi_supersede_memory",
-  description:
-    "Mark a memory as superseded (soft delete). " +
-    "Use when information is outdated or incorrect. " +
-    "The memory remains for audit trail but won't appear in normal queries. " +
-    "Only the source agent can supersede.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      memory_id: {
-        type: "string",
-        description: "Memory ID (UUID)",
-      },
-    },
-    required: ["memory_id"],
-  },
-  handler: async (params: unknown) => {
-    const { memory_id } = params as SupersedeMemoryParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.supersedeMemory(memory_id);
-
-    return {
-      success: true,
-      id: response.id,
-      status: response.status,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_archive_memory
-// =============================================================================
-
-const archiveMemoryTool: McpTool = {
-  name: "thenvoi_archive_memory",
-  description:
-    "Archive a memory (hide but preserve). " +
-    "Use when memory is valid but not currently needed. " +
-    "Archived memories can be restored later by humans. " +
-    "Only the source agent can archive.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      memory_id: {
-        type: "string",
-        description: "Memory ID (UUID)",
-      },
-    },
-    required: ["memory_id"],
-  },
-  handler: async (params: unknown) => {
-    const { memory_id } = params as ArchiveMemoryParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.archiveMemory(memory_id);
-
-    return {
-      success: true,
-      id: response.id,
-      status: response.status,
-    };
-  },
-};
-
-// =============================================================================
 // Export All Tools
 // =============================================================================
 
@@ -956,12 +668,6 @@ export const mcpTools: McpTool[] = [
   removeContactTool,
   listContactRequestsTool,
   respondContactRequestTool,
-  // Memory tools
-  listMemoriesTool,
-  storeMemoryTool,
-  getMemoryTool,
-  supersedeMemoryTool,
-  archiveMemoryTool,
 ];
 
 /**

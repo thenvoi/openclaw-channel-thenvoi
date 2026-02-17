@@ -156,6 +156,7 @@ export interface AgentMetadata {
 export interface Peer {
   id: string;
   name: string;
+  handle?: string;
   type: SenderType;
   description?: string;
   status?: string;
@@ -263,7 +264,7 @@ export interface LookupPeersParams {
 
 export interface AddParticipantParams {
   room_id: string;
-  name: string;
+  handle: string;
   role?: ParticipantRole;
 }
 
@@ -633,112 +634,6 @@ export interface RespondContactRequestParams {
   action: ContactRequestAction;
   handle?: string;
   request_id?: string;
-}
-
-// =============================================================================
-// Memory Types
-// =============================================================================
-
-export type MemorySystem = "sensory" | "working" | "long_term";
-
-export type MemoryType = "iconic" | "echoic" | "haptic" | "episodic" | "semantic" | "procedural";
-
-export type MemorySegment = "user" | "agent" | "tool" | "guideline";
-
-export type MemoryScope = "subject" | "organization";
-
-export type MemoryStatus = "active" | "superseded" | "archived";
-
-/**
- * A memory entry.
- */
-export interface Memory {
-  id: string;
-  content: string;
-  system: MemorySystem;
-  type: MemoryType;
-  segment: MemorySegment;
-  scope: MemoryScope;
-  status: MemoryStatus;
-  thought: string;
-  subject_id?: string;
-  source_agent_id?: string;
-  metadata?: Record<string, unknown>;
-  inserted_at?: string;
-}
-
-// =============================================================================
-// Memory REST API Response Types
-// =============================================================================
-
-export interface ListMemoriesResponse {
-  memories: Memory[];
-  metadata: {
-    page_size: number;
-    total_count: number;
-  };
-}
-
-export interface StoreMemoryResponse {
-  id: string;
-  content: string;
-  system: MemorySystem;
-  type: MemoryType;
-  segment: MemorySegment;
-  scope: MemoryScope;
-  status: MemoryStatus;
-  thought: string;
-  inserted_at?: string;
-}
-
-export type GetMemoryResponse = Memory;
-
-export interface SupersedeMemoryResponse {
-  id: string;
-  status: "superseded";
-}
-
-export interface ArchiveMemoryResponse {
-  id: string;
-  status: "archived";
-}
-
-// =============================================================================
-// Memory MCP Tool Params
-// =============================================================================
-
-export interface ListMemoriesParams {
-  subject_id?: string;
-  scope?: MemoryScope | "all";
-  system?: MemorySystem;
-  type?: MemoryType;
-  segment?: MemorySegment;
-  content_query?: string;
-  page_size?: number;
-  status?: MemoryStatus | "all";
-}
-
-export interface StoreMemoryParams {
-  content: string;
-  system: MemorySystem;
-  type: MemoryType;
-  segment: MemorySegment;
-  thought: string;
-  scope?: MemoryScope;
-  subject_id?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface GetMemoryParams {
-  memory_id: string;
-}
-
-export interface SupersedeMemoryParams {
-  memory_id: string;
-}
-
-export interface ArchiveMemoryParams {
-  memory_id: string;
 }
 
 // =============================================================================
