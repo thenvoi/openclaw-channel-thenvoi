@@ -156,6 +156,7 @@ export interface AgentMetadata {
 export interface Peer {
   id: string;
   name: string;
+  handle?: string;
   type: SenderType;
   description?: string;
   status?: string;
@@ -263,7 +264,7 @@ export interface LookupPeersParams {
 
 export interface AddParticipantParams {
   room_id: string;
-  name: string;
+  handle: string;
   role?: ParticipantRole;
 }
 

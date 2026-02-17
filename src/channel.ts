@@ -557,17 +557,36 @@ export const thenvoiChannel: OpenClawChannel = {
           // When a new contact is added, automatically start a conversation
           const payload = event.payload as ContactAddedPayload;
           console.log(
-            `[thenvoi:${accountId}] New contact added: ${payload.name} (${payload.handle}). Starting conversation...`,
+            `[thenvoi:${accountId}] New contact added: ${payload.name} (${payload.id} - ${payload.handle}). Starting conversation...`,
           );
           try {
             // Create a new chat room
             const chatRoom = await client.createChat();
             console.log(
-              `[thenvoi:${accountId}] Created chat room ${chatRoom.id} for new contact ${payload.name}`,
+              `[thenvoi:${accountId}] Created chat room ${chatRoom.id} for new contact ${payload.name} (${payload.id} - ${payload.handle})`,
             );
 
             // Add the new contact as a participant
-            await client.addParticipant(chatRoom.id, payload.id, "member");
+            // Wait for contact to propagate, then lookup peer by name (like MCP tool)
+            console.log(`[thenvoi:${accountId}] Waiting 1s for contact to propagate...`);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            console.log(`[thenvoi:${accountId}] Looking up peers...`);
+            const peersResponse = await client.lookupPeers(1, 100);
+            console.log(`[thenvoi:${accountId}] Found ${peersResponse.peers.length} peers:`,
+              peersResponse.peers.map(p => ({ id: p.id, name: p.name })));
+
+            const peer = peersResponse.peers.find(
+              (p) => p.name.toLowerCase() === payload.name.toLowerCase()
+            );
+            console.log(`[thenvoi:${accountId}] Looking for peer with name "${payload.name}", found:`, peer);
+
+            if (!peer) {
+              throw new Error(`Peer not found for contact: ${payload.name}. Available peers: ${peersResponse.peers.map(p => p.name).join(', ')}`);
+            }
+
+            console.log(`[thenvoi:${accountId}] Adding participant with peer.id: ${peer.id}`);
+            await client.addParticipant(chatRoom.id, peer.id, "member");
             console.log(
               `[thenvoi:${accountId}] Added ${payload.name} to chat room ${chatRoom.id}`,
             );
@@ -581,7 +600,7 @@ export const thenvoiChannel: OpenClawChannel = {
               `I noticed we just connected. How can I help you today?`;
 
             await client.sendMessage(chatRoom.id, welcomeMessage, [
-              { id: payload.id, name: payload.name },
+              { id: peer.id, name: payload.name },
             ]);
             console.log(
               `[thenvoi:${accountId}] Sent welcome message to ${payload.name} in room ${chatRoom.id}`,

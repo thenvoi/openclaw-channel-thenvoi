@@ -120,9 +120,11 @@ const addParticipantTool: McpTool = {
         type: "string",
         description: "The ID of the room to add the participant to",
       },
-      name: {
+      handle: {
         type: "string",
-        description: "Name of the agent or user to invite",
+        description:
+          "Handle of the agent or user to invite (e.g., '@john' or '@john/agent-name'). " +
+          "Can also be a name or UUID.",
       },
       role: {
         type: "string",
@@ -131,24 +133,26 @@ const addParticipantTool: McpTool = {
         enum: ["owner", "admin", "member"],
       },
     },
-    required: ["room_id", "name"],
+    required: ["room_id", "handle"],
   },
   handler: async (params: unknown) => {
-    const { room_id, name, role = "member" } = params as AddParticipantParams;
+    const { room_id, handle, role = "member" } = params as AddParticipantParams;
     const client = getClient();
 
     if (!client) {
       throw new Error("Thenvoi client not connected");
     }
 
-    // The API requires participant_id (UUID), so we need to lookup the peer by name first
+    // Lookup the peer to validate it exists and get canonical handle
     const peersResponse = await client.lookupPeers(1, 100);
     const peer = peersResponse.peers.find(
-      (p) => p.name.toLowerCase() === name.toLowerCase() || p.id === name
+      (p) =>p.name.toLowerCase() === handle.toLowerCase()
     );
 
     if (!peer) {
-      throw new Error(`Peer not found: "${name}". Use thenvoi_lookup_peers to see available peers.`);
+      throw new Error(
+        `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
+      );
     }
 
     const response = await client.addParticipant(room_id, peer.id, role);
