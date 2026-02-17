@@ -43,8 +43,8 @@ describe("MCP Tools", () => {
   });
 
   describe("mcpTools array", () => {
-    it("should contain 17 tools", () => {
-      expect(mcpTools).toHaveLength(17);
+    it("should contain 12 tools", () => {
+      expect(mcpTools).toHaveLength(12);
     });
 
     it("should have unique tool names", () => {
@@ -84,7 +84,7 @@ describe("MCP Tools", () => {
     it("should return schemas without handlers", () => {
       const schemas = getMcpToolSchemas();
 
-      expect(schemas).toHaveLength(17);
+      expect(schemas).toHaveLength(12);
       schemas.forEach((schema) => {
         expect(schema).toHaveProperty("name");
         expect(schema).toHaveProperty("description");
@@ -139,7 +139,7 @@ describe("MCP Tools", () => {
 
       const result = await executeMcpTool("thenvoi_add_participant", {
         room_id: "room-001",
-        name: "Weather Agent",
+        handle: "Weather Agent",
       });
 
       // First it should lookup peers
@@ -168,7 +168,7 @@ describe("MCP Tools", () => {
 
       await executeMcpTool("thenvoi_add_participant", {
         room_id: "room-001",
-        name: "Admin User",
+        handle: "Admin User",
         role: "admin",
       });
 
@@ -185,7 +185,7 @@ describe("MCP Tools", () => {
       await expect(
         executeMcpTool("thenvoi_add_participant", {
           room_id: "room-001",
-          name: "Unknown User",
+          handle: "Unknown User",
         }),
       ).rejects.toThrow('Peer not found: "Unknown User"');
     });
@@ -196,7 +196,7 @@ describe("MCP Tools", () => {
       await expect(
         executeMcpTool("thenvoi_add_participant", {
           room_id: "room-001",
-          name: "Test",
+          handle: "Test",
         }),
       ).rejects.toThrow("Thenvoi client not connected");
     });

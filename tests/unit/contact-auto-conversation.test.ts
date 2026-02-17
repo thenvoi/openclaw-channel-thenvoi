@@ -32,6 +32,7 @@ describe("Contact Auto-Conversation Handler", () => {
     getAgentMe: ReturnType<typeof vi.fn>;
     sendMessage: ReturnType<typeof vi.fn>;
     respondContactRequest: ReturnType<typeof vi.fn>;
+    lookupPeers: ReturnType<typeof vi.fn>;
   };
   let capturedContactConfig: ContactEventConfig | undefined;
   let capturedCallbacks: unknown;
@@ -40,6 +41,7 @@ describe("Contact Auto-Conversation Handler", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     capturedContactConfig = undefined;
     capturedCallbacks = undefined;
 
@@ -50,6 +52,17 @@ describe("Contact Auto-Conversation Handler", () => {
       getAgentMe: vi.fn().mockResolvedValue(mockAgentMetadata),
       sendMessage: vi.fn().mockResolvedValue(mockSendMessageResponse),
       respondContactRequest: vi.fn().mockResolvedValue({ success: true }),
+      // Mock lookupPeers to return contacts when they're looked up
+      lookupPeers: vi.fn().mockImplementation(() => Promise.resolve({
+        peers: [
+          { id: mockContactAddedPayload.id, name: mockContactAddedPayload.name, handle: mockContactAddedPayload.handle, type: mockContactAddedPayload.type },
+          { id: mockAgentContactAddedPayload.id, name: mockAgentContactAddedPayload.name, handle: mockAgentContactAddedPayload.handle, type: mockAgentContactAddedPayload.type },
+        ],
+        page: 1,
+        page_size: 100,
+        total_count: 2,
+        has_more: false,
+      })),
     };
 
     // Mock ThenvoiClient constructor to return our mock client
@@ -77,6 +90,7 @@ describe("Contact Auto-Conversation Handler", () => {
     await thenvoiChannel.gateway?.stopAccount?.({ accountId: "test-account" } as never);
     consoleLogSpy.mockRestore();
     consoleErrorSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   /**
@@ -105,7 +119,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await handler(event);
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100); // Wait for the 1s propagation delay
+      await promise;
 
       expect(mockClient.createChat).toHaveBeenCalledTimes(1);
     });
@@ -118,11 +134,15 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await handler(event);
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await promise;
 
+      // The code looks up peer by name and uses the peer.id from lookup
+      expect(mockClient.lookupPeers).toHaveBeenCalledWith(1, 100);
       expect(mockClient.addParticipant).toHaveBeenCalledWith(
         mockCreateChatroomResponse.id,
-        mockContactAddedPayload.id,
+        mockContactAddedPayload.id, // peer.id from lookup matches contact.id in our mock
         "member"
       );
     });
@@ -135,7 +155,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await handler(event);
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await promise;
 
       expect(mockClient.getAgentMe).toHaveBeenCalledTimes(1);
     });
@@ -148,7 +170,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await handler(event);
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await promise;
 
       expect(mockClient.sendMessage).toHaveBeenCalledWith(
         mockCreateChatroomResponse.id,
@@ -169,7 +193,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockAgentContactAddedPayload,
       };
 
-      await handler(event);
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await promise;
 
       expect(mockClient.createChat).toHaveBeenCalledTimes(1);
       expect(mockClient.addParticipant).toHaveBeenCalledWith(
@@ -192,7 +218,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await handler(event);
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await promise;
 
       // Verify logging of key steps
       expect(consoleLogSpy).toHaveBeenCalledWith(
@@ -221,8 +249,10 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
       // Should not throw
-      await expect(handler(event)).resolves.toBeUndefined();
+      await expect(promise).resolves.toBeUndefined();
 
       // Should log the error
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -245,7 +275,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await expect(handler(event)).resolves.toBeUndefined();
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await expect(promise).resolves.toBeUndefined();
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining("Failed to start conversation"),
@@ -267,7 +299,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await expect(handler(event)).resolves.toBeUndefined();
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await expect(promise).resolves.toBeUndefined();
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining("Failed to start conversation"),
@@ -285,7 +319,9 @@ describe("Contact Auto-Conversation Handler", () => {
         payload: mockContactAddedPayload,
       };
 
-      await expect(handler(event)).resolves.toBeUndefined();
+      const promise = handler(event);
+      await vi.advanceTimersByTimeAsync(1100);
+      await expect(promise).resolves.toBeUndefined();
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining("Failed to start conversation"),
