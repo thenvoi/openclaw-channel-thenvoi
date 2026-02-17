@@ -9,22 +9,14 @@ import type {
   AddContactResponse,
   AddParticipantResponse,
   AgentMetadata,
-  ArchiveMemoryResponse,
   ContactRequestAction,
   CreateChatroomResponse,
   EventMessageType,
   EventMetadata,
-  GetMemoryResponse,
   ListContactRequestsResponse,
   ListContactsResponse,
-  ListMemoriesResponse,
   LookupPeersResponse,
   MentionRequest,
-  MemoryScope,
-  MemorySegment,
-  MemoryStatus,
-  MemorySystem,
-  MemoryType,
   NextMessageResponse,
   NoMessageResponse,
   Participant,
@@ -32,8 +24,6 @@ import type {
   RespondContactRequestResponse,
   SendEventResponse,
   SendMessageResponse,
-  StoreMemoryResponse,
-  SupersedeMemoryResponse,
   ThenvoiConfig,
 } from "./types.js";
 import { ThenvoiAuthError, ThenvoiError, ThenvoiRateLimitError } from "./types.js";
@@ -459,121 +449,6 @@ export class ThenvoiClient {
       "POST",
       "/api/v1/agent/contacts/requests/respond",
       body,
-    );
-    return response.data;
-  }
-
-  // ===========================================================================
-  // Memories API
-  // ===========================================================================
-
-  /**
-   * List memories accessible to the agent.
-   */
-  async listMemories(options: {
-    subjectId?: string;
-    scope?: MemoryScope | "all";
-    system?: MemorySystem;
-    type?: MemoryType;
-    segment?: MemorySegment;
-    contentQuery?: string;
-    pageSize?: number;
-    status?: MemoryStatus | "all";
-  } = {}): Promise<ListMemoriesResponse> {
-    const params = new URLSearchParams();
-    if (options.subjectId) params.set("subject_id", options.subjectId);
-    if (options.scope) params.set("scope", options.scope);
-    if (options.system) params.set("system", options.system);
-    if (options.type) params.set("type", options.type);
-    if (options.segment) params.set("segment", options.segment);
-    if (options.contentQuery) params.set("content_query", options.contentQuery);
-    if (options.pageSize) params.set("page_size", options.pageSize.toString());
-    if (options.status) params.set("status", options.status);
-
-    const response = await this.request<{
-      data: ListMemoriesResponse["memories"];
-      meta: ListMemoriesResponse["metadata"];
-    }>("GET", `/api/v1/agent/memories?${params}`);
-
-    return {
-      memories: response.data || [],
-      metadata: response.meta || {
-        page_size: options.pageSize || 50,
-        total_count: 0,
-      },
-    };
-  }
-
-  /**
-   * Store a new memory entry.
-   */
-  async storeMemory(memory: {
-    content: string;
-    system: MemorySystem;
-    type: MemoryType;
-    segment: MemorySegment;
-    thought: string;
-    scope?: MemoryScope;
-    subjectId?: string;
-    metadata?: Record<string, unknown>;
-  }): Promise<StoreMemoryResponse> {
-    const body: Record<string, unknown> = {
-      memory: {
-        content: memory.content,
-        system: memory.system,
-        type: memory.type,
-        segment: memory.segment,
-        thought: memory.thought,
-        scope: memory.scope || "subject",
-      },
-    };
-
-    if (memory.subjectId) {
-      (body.memory as Record<string, unknown>).subject_id = memory.subjectId;
-    }
-    if (memory.metadata) {
-      (body.memory as Record<string, unknown>).metadata = memory.metadata;
-    }
-
-    const response = await this.request<{ data: StoreMemoryResponse }>(
-      "POST",
-      "/api/v1/agent/memories",
-      body,
-    );
-    return response.data;
-  }
-
-  /**
-   * Retrieve a specific memory by ID.
-   */
-  async getMemory(memoryId: string): Promise<GetMemoryResponse> {
-    const response = await this.request<{ data: GetMemoryResponse }>(
-      "GET",
-      `/api/v1/agent/memories/${encodeURIComponent(memoryId)}`,
-    );
-    return response.data;
-  }
-
-  /**
-   * Mark a memory as superseded (soft delete).
-   * Use when information is outdated or incorrect.
-   */
-  async supersedeMemory(memoryId: string): Promise<SupersedeMemoryResponse> {
-    const response = await this.request<{ data: SupersedeMemoryResponse }>(
-      "POST",
-      `/api/v1/agent/memories/${encodeURIComponent(memoryId)}/supersede`,
-    );
-    return response.data;
-  }
-
-  /**
-   * Archive a memory (hide but preserve).
-   * Use when memory is valid but not currently needed.
-   */
-  async archiveMemory(memoryId: string): Promise<ArchiveMemoryResponse> {
-    const response = await this.request<{ data: ArchiveMemoryResponse }>(
-      "POST",
-      `/api/v1/agent/memories/${encodeURIComponent(memoryId)}/archive`,
     );
     return response.data;
   }
