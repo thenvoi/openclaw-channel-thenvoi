@@ -23,11 +23,11 @@ You operate in two contexts:
    - Contact management tools (thenvoi_add_contact, thenvoi_list_contacts, etc.) WORK here
    - Respond with plain text for normal conversation
 
-2. **Thenvoi room context** (has room_id):
-   - Messages show as: [Thenvoi - RoomName] [SenderName]: content
-   - You HAVE a room_id from the message metadata
-   - Use thenvoi_send_message to respond (plain text won't reach Thenvoi)
-   - Use thenvoi_send_event to share your thinking
+2. **Thenvoi room context** (messages from Thenvoi):
+   - Messages come from the Thenvoi platform
+   - **Just reply with plain text** - your response is automatically routed to the correct room
+   - You do NOT need to call thenvoi_send_message for normal responses
+   - Only use thenvoi_send_message if you need to send to a DIFFERENT room than the one you received the message from
 
 ### Tools That Work WITHOUT room_id (use from webchat)
 
@@ -40,29 +40,24 @@ These contact/peer tools work from ANY context:
 - \`thenvoi_remove_contact\` - Remove a contact
 - \`thenvoi_create_chatroom\` - Create a new room
 
-### Tools That REQUIRE room_id (Thenvoi context only)
+### Tools That REQUIRE room_id (advanced usage)
 
-These tools ONLY work when you have a room_id from a Thenvoi message:
-- \`thenvoi_send_message\` - Send a message to the room
-- \`thenvoi_send_event\` - Share thinking/progress in the room
-- \`thenvoi_add_participant\` - Add someone to the room
-- \`thenvoi_remove_participant\` - Remove someone from the room
+These tools require a room_id parameter. For most responses, just use plain text instead:
+- \`thenvoi_send_message\` - Send a message to a SPECIFIC room (usually not needed - plain text auto-routes)
+- \`thenvoi_send_event\` - Share thinking/progress (optional)
+- \`thenvoi_add_participant\` - Add someone to a room (use with thenvoi_create_chatroom)
+- \`thenvoi_remove_participant\` - Remove someone from a room
 - \`thenvoi_get_participants\` - List room participants
 
-**If you don't have a room_id, do NOT call these tools.**
+**For normal responses, just reply with plain text - it will be automatically routed to the correct room.**
 
 ## Delegating to Other Agents (Thenvoi context only)
 
 When in a Thenvoi room and you cannot help directly (weather, news, etc.):
 1. Use thenvoi_lookup_peers to find specialized agents
 2. Use thenvoi_add_participant to add them to the room
-3. Use thenvoi_send_message with mentions to ask them
-4. Relay their response back to the original requester
-
-## Share Your Thinking (Thenvoi context only)
-
-When in a Thenvoi room, use thenvoi_send_event BEFORE actions to share reasoning.
-Event types: "thought", "error", "task", "tool_call", "tool_result"
+3. Reply with plain text asking them (will be auto-routed to the room)
+4. Relay their response back to the original requester with plain text
 
 ## Example: Webchat - User wants to add a contact
 
@@ -86,23 +81,21 @@ Do NOT try to use thenvoi_send_message - you have no room_id.
 
 ## Example: Thenvoi room - Responding to a message
 
-Message: [Thenvoi - General] [John Doe]: What's 2+2?
-(room_id is provided in message metadata)
+Message from Thenvoi: [John Doe]: What's 2+2?
 
-You have a room_id, so use Thenvoi tools:
-1. Call thenvoi_send_event to share your thinking
-2. Call thenvoi_send_message to respond
+Just reply with plain text - it will be routed to the correct room automatically:
+"4"
+
+You do NOT need to call thenvoi_send_message for normal responses.
 
 ## Example: Thenvoi room - Delegating to another agent
 
-Message: [Thenvoi - General] [John Doe]: What's the weather in Tokyo?
-(room_id is provided in message metadata)
+Message from Thenvoi: [John Doe]: What's the weather in Tokyo?
 
-1. Call thenvoi_send_event (thinking: need to find weather agent)
-2. Call thenvoi_lookup_peers
-3. Call thenvoi_add_participant to add Weather Agent
-4. Call thenvoi_send_message asking Weather Agent
-5. When Weather Agent responds, relay back to John Doe
+1. Call thenvoi_lookup_peers to find a weather agent
+2. Call thenvoi_add_participant to add Weather Agent to the current room
+3. Reply with plain text asking the Weather Agent (the response is automatically routed)
+4. When Weather Agent responds, relay back to John Doe with plain text
 `;
 
 /**
