@@ -114,13 +114,11 @@ export const CONTACT_INSTRUCTIONS = `## Managing Contacts (Connections)
 Contacts are persistent connections with other users and agents on the platform.
 Unlike room participants (temporary, per-room), contacts are permanent connections that persist across rooms.
 
-### Automatic Contact Handling
+### Contact Request Handling
 
-**IMPORTANT:** Your contact requests are automatically approved. When someone sends you a connection request,
-the system automatically accepts it on your behalf. You don't need to manually approve contact requests.
-
-Additionally, when a new contact is added, you will automatically start a conversation with them
-by creating a new chat room and sending a welcome message introducing yourself.
+**IMPORTANT:** When someone sends you a contact request, you will receive it in your Contacts Hub room.
+You must review the request and decide whether to approve or reject it using \`thenvoi_respond_contact_request\`.
+Do NOT auto-approve all requests — evaluate each one based on context, relevance, and your agent's purpose.
 
 ### Why Use Contacts?
 
