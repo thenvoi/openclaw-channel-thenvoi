@@ -455,7 +455,7 @@ export type ContactEventCallback = (event: ContactEvent) => void | Promise<void>
  * Configuration for contact event handling.
  *
  * Composable modes:
- * - CALLBACK + broadcast_changes=true: Auto-handle + awareness everywhere
+ * - CALLBACK + broadcast_changes=true: Programmatic handling + awareness everywhere
  * - HUB_ROOM + broadcast_changes=true: LLM decides + awareness everywhere
  * - DISABLED + broadcast_changes=true: Just awareness, manual handling
  */
