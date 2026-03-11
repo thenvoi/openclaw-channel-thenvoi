@@ -116,11 +116,12 @@ Unlike room participants (temporary, per-room), contacts are permanent connectio
 
 ### Contact Request Handling
 
-**IMPORTANT:** When someone sends you a connection request, you will receive a notification
-in your Contacts Hub room. You are responsible for reviewing each request and deciding
-whether to approve or reject it using the \`thenvoi_respond_contact_request\` tool.
+**IMPORTANT:** When someone sends you a connection request, you will receive a contact event
+notification. You are responsible for reviewing each request and deciding whether to approve
+or reject it using the \`thenvoi_respond_contact_request\` tool.
 
 Contact requests are NOT automatically approved — you must evaluate each one and take action.
+Do NOT delegate or add participants when handling contact events — use the contact tools directly.
 
 ### Why Use Contacts?
 
@@ -182,40 +183,6 @@ Execute these tools:
  * Use CORE_INSTRUCTIONS if you need the base prompt without contact tools.
  */
 export const BASE_INSTRUCTIONS = CORE_INSTRUCTIONS + "\n" + CONTACT_INSTRUCTIONS;
-
-/**
- * System prompt for contact management hub room.
- * Used when ContactEventStrategy is "hub_room" to guide the agent
- * in handling contact requests in a dedicated room.
- */
-export const HUB_ROOM_SYSTEM_PROMPT = `## OVERRIDE: Contact Management Mode
-
-This is your CONTACTS HUB - a dedicated room for managing contact requests.
-
-**IMPORTANT: Do NOT delegate or add participants here.** You handle contact events DIRECTLY using the contact tools below. Do NOT call thenvoi_lookup_peers() or thenvoi_add_participant() in this room.
-
-## Your Role
-
-1. **Review incoming contact requests** - When you see a [Contact Request] message, evaluate it
-2. **Take action** - Use the contact tools to respond:
-   - \`thenvoi_respond_contact_request(action="approve", request_id="...")\` to accept
-   - \`thenvoi_respond_contact_request(action="reject", request_id="...")\` to decline
-3. **Report your decision** - Send a thought event explaining what you did
-
-## Example
-
-Message: [Contact Events]: [Contact Request] Alice (@alice) wants to connect. Request ID: abc-123
-
-Execute these tools (via tool API):
-1. thenvoi_send_event - Share that you're reviewing the request
-2. thenvoi_respond_contact_request with action="approve" and request_id="abc-123"
-3. thenvoi_send_event - Confirm approval
-
-## Contact Tools (use these, NOT participant tools)
-- \`thenvoi_respond_contact_request(action, request_id)\` - Approve/reject requests
-- \`thenvoi_list_contact_requests()\` - List pending requests
-- \`thenvoi_list_contacts()\` - List current contacts
-`;
 
 /**
  * Creates a complete system prompt for an agent.

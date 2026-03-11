@@ -180,13 +180,12 @@ export {
   BASE_INSTRUCTIONS,
   CORE_INSTRUCTIONS,
   CONTACT_INSTRUCTIONS,
-  HUB_ROOM_SYSTEM_PROMPT,
   buildSystemPrompt,
 } from "./prompts.js";
 
 // Contact handler exports
-export { ContactEventHandler } from "./contact-handler.js";
-export type { HubEventCallback, HubInitCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
+export { ContactEventHandler, CONTACTS_THREAD_ID } from "./contact-handler.js";
+export type { ContactEventDispatchCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
 
 // Type exports
 export type {

@@ -442,9 +442,9 @@ export interface ReconnectConfig {
  *
  * - DISABLED: Ignore contact events (default). Use manual "check contacts" workflow.
  * - CALLBACK: Programmatic handling via on_event callback. No LLM involvement.
- * - HUB_ROOM: LLM reasoning in a dedicated hub room.
+ * - DIRECT: Dispatch contact events directly to the LLM agent for decision-making.
  */
-export type ContactEventStrategy = "disabled" | "callback" | "hub_room";
+export type ContactEventStrategy = "disabled" | "callback" | "direct";
 
 /**
  * Callback type for contact event handling.
@@ -456,7 +456,7 @@ export type ContactEventCallback = (event: ContactEvent) => void | Promise<void>
  *
  * Composable modes:
  * - CALLBACK + broadcast_changes=true: Programmatic handling + awareness everywhere
- * - HUB_ROOM + broadcast_changes=true: LLM decides + awareness everywhere
+ * - DIRECT + broadcast_changes=true: LLM decides + awareness everywhere
  * - DISABLED + broadcast_changes=true: Just awareness, manual handling
  */
 export interface ContactEventConfig {
@@ -465,12 +465,6 @@ export interface ContactEventConfig {
    * @default "disabled"
    */
   strategy?: ContactEventStrategy;
-
-  /**
-   * For HUB_ROOM strategy: optional task_id (UUID) for the dedicated room.
-   * If undefined, creates a room without an associated task.
-   */
-  hubTaskId?: string;
 
   /**
    * For CALLBACK strategy: programmatic handler function.

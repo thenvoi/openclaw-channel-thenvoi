@@ -1,7 +1,7 @@
 /**
  * Unit tests for the contact event handling configuration.
  *
- * Tests that the channel configures HUB_ROOM strategy so the LLM
+ * Tests that the channel configures DIRECT strategy so the LLM
  * decides whether to approve or reject contact requests.
  */
 
@@ -74,10 +74,10 @@ describe("Contact Event Handling Config", () => {
   }
 
   describe("contact config setup", () => {
-    it("should configure contact handling with hub_room strategy", async () => {
+    it("should configure contact handling with direct strategy", async () => {
       const config = await startChannelAndGetConfig();
 
-      expect(config.strategy).toBe("hub_room");
+      expect(config.strategy).toBe("direct");
     });
 
     it("should enable broadcast changes", async () => {

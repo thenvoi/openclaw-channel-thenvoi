@@ -4,7 +4,7 @@
  * Routes events based on ContactEventConfig strategy:
  * - DISABLED: Ignores all contact events
  * - CALLBACK: Calls programmatic callback
- * - HUB_ROOM: Routes to dedicated hub room for LLM reasoning
+ * - DIRECT: Dispatches contact events directly to the LLM agent
  *
  * Ported from thenvoi-sdk-python/src/thenvoi/runtime/contact_handler.py
  */
@@ -16,20 +16,20 @@ import type {
   ContactRequestReceivedPayload,
   MessageCreatedPayload,
 } from "./types.js";
-import { HUB_ROOM_SYSTEM_PROMPT } from "./prompts.js";
 
 // Maximum size of deduplication cache
 const MAX_DEDUP_CACHE_SIZE = 1000;
 
 /**
- * Callback to inject a message event into the hub room.
+ * Fixed thread ID for contact events dispatched directly to the agent.
+ * This is not a real Thenvoi room — it's a virtual thread for OpenClaw routing.
  */
-export type HubEventCallback = (roomId: string, payload: MessageCreatedPayload) => void | Promise<void>;
+export const CONTACTS_THREAD_ID = "contacts";
 
 /**
- * Callback to inject system prompt when hub room is first used.
+ * Callback to dispatch a contact event to the agent.
  */
-export type HubInitCallback = (roomId: string, prompt: string) => void | Promise<void>;
+export type ContactEventDispatchCallback = (threadId: string, payload: MessageCreatedPayload) => void | Promise<void>;
 
 /**
  * Callback to broadcast contact changes to all sessions.
@@ -40,8 +40,7 @@ export interface ContactEventHandlerOptions {
   config: ContactEventConfig;
   client: ThenvoiClient;
   onBroadcast?: BroadcastCallback;
-  onHubEvent?: HubEventCallback;
-  onHubInit?: HubInitCallback;
+  onDispatch?: ContactEventDispatchCallback;
 }
 
 /**
@@ -54,17 +53,10 @@ export class ContactEventHandler {
   private readonly config: ContactEventConfig;
   private readonly client: ThenvoiClient;
   private readonly onBroadcast?: BroadcastCallback;
-  private readonly onHubEvent?: HubEventCallback;
-  private readonly onHubInit?: HubInitCallback;
+  private readonly onDispatch?: ContactEventDispatchCallback;
 
   // Deduplication cache: event key -> processed flag
   private readonly processedEvents: Map<string, boolean> = new Map();
-
-  // Hub room ID (for HUB_ROOM strategy)
-  private hubRoomId: string | null = null;
-
-  // Whether hub room has been initialized with system prompt
-  private hubRoomInitialized = false;
 
   // Cache for contact request info (request_id -> {from_handle, from_name, message})
   // Used to enrich ContactRequestUpdatedEvent with sender info
@@ -74,37 +66,7 @@ export class ContactEventHandler {
     this.config = options.config;
     this.client = options.client;
     this.onBroadcast = options.onBroadcast;
-    this.onHubEvent = options.onHubEvent;
-    this.onHubInit = options.onHubInit;
-  }
-
-  /**
-   * Get the hub room ID if created.
-   */
-  getHubRoomId(): string | null {
-    return this.hubRoomId;
-  }
-
-  /**
-   * Initialize hub room at startup (for HUB_ROOM strategy).
-   *
-   * Creates the hub room via REST. The room_added WebSocket event
-   * will trigger room channel subscription.
-   */
-  async initializeHubRoom(): Promise<string> {
-    if (this.hubRoomId !== null) {
-      return this.hubRoomId;
-    }
-
-    console.log(
-      `[thenvoi] Creating hub room for contact events (task_id=${this.config.hubTaskId ?? "none"})`,
-    );
-
-    const response = await this.client.createChat(this.config.hubTaskId);
-    this.hubRoomId = response.id;
-
-    console.log(`[thenvoi] Hub room created: ${this.hubRoomId}`);
-    return this.hubRoomId;
+    this.onDispatch = options.onDispatch;
   }
 
   /**
@@ -141,8 +103,8 @@ export class ContactEventHandler {
         success = await this.handleCallback(event);
         break;
 
-      case "hub_room":
-        success = await this.handleHubRoom(event);
+      case "direct":
+        success = await this.handleDirect(event);
         break;
     }
 
@@ -173,36 +135,23 @@ export class ContactEventHandler {
   }
 
   /**
-   * Handle event via HUB_ROOM strategy.
+   * Handle event via DIRECT strategy.
    *
-   * Routes event to dedicated hub room for LLM reasoning.
+   * Dispatches contact event directly to the LLM agent using a fixed
+   * virtual thread ID. No Thenvoi room is created.
    */
-  private async handleHubRoom(event: ContactEvent): Promise<boolean> {
-    if (!this.onHubEvent) {
-      console.warn("[thenvoi] HUB_ROOM strategy but no onHubEvent callback configured");
-      return false;
-    }
-
-    if (!this.hubRoomId) {
-      console.error("[thenvoi] Hub room not initialized - call initializeHubRoom() first");
+  private async handleDirect(event: ContactEvent): Promise<boolean> {
+    if (!this.onDispatch) {
+      console.warn("[thenvoi] DIRECT strategy but no onDispatch callback configured");
       return false;
     }
 
     try {
-      const hubId = this.hubRoomId;
-
-      // Inject system prompt on first use
-      if (!this.hubRoomInitialized && this.onHubInit) {
-        console.log("[thenvoi] Initializing hub room with system prompt");
-        await this.onHubInit(hubId, HUB_ROOM_SYSTEM_PROMPT);
-        this.hubRoomInitialized = true;
-      }
-
       // Format event as a message for LLM processing
       const content = await this.formatEventForRoom(event);
       const eventType = this.getEventType(event);
 
-      // Create synthetic MessageCreatedPayload for hub room
+      // Create synthetic MessageCreatedPayload
       const now = new Date().toISOString();
       const payload: MessageCreatedPayload = {
         id: crypto.randomUUID(),
@@ -212,41 +161,25 @@ export class ContactEventHandler {
         sender_id: "contact-events",
         sender_name: "Contact Events",
         metadata: {},
-        chat_room_id: hubId,
+        chat_room_id: CONTACTS_THREAD_ID,
         inserted_at: now,
         updated_at: now,
       };
 
-      // Push to hub room (triggers agent processing)
-      console.log(`[thenvoi] Injecting contact event to hub room ${hubId}: ${eventType}`);
-      await this.onHubEvent(hubId, payload);
+      // Dispatch directly to agent
+      console.log(`[thenvoi] Dispatching contact event to agent: ${eventType}`);
+      await this.onDispatch(CONTACTS_THREAD_ID, payload);
 
-      // Also POST as task event to room for persistence/visibility
-      await this.postTaskEvent(hubId, content, eventType);
-
-      console.log("[thenvoi] Contact event injected to hub room successfully");
+      console.log("[thenvoi] Contact event dispatched to agent successfully");
       return true;
     } catch (error) {
-      console.error("[thenvoi] Failed to inject contact event to hub room:", error);
+      console.error("[thenvoi] Failed to dispatch contact event to agent:", error);
       return false;
     }
   }
 
   /**
-   * Post contact event as task event to room via REST.
-   */
-  private async postTaskEvent(roomId: string, content: string, eventType: string): Promise<void> {
-    try {
-      await this.client.sendEvent(roomId, content, "task", { contact_event_type: eventType });
-      console.log(`[thenvoi] Task event posted to hub room: ${eventType}`);
-    } catch (error) {
-      // Log but don't fail - the message injection is the important part
-      console.warn("[thenvoi] Failed to post task event to hub room:", error);
-    }
-  }
-
-  /**
-   * Format contact event as human-readable message for hub room.
+   * Format contact event as human-readable message for LLM processing.
    */
   private async formatEventForRoom(event: ContactEvent): Promise<string> {
     switch (event.type) {
@@ -493,7 +426,6 @@ export class ContactEventHandler {
     return {
       strategy: this.config.strategy ?? "disabled",
       dedupCacheSize: this.processedEvents.size,
-      hubRoomId: this.hubRoomId,
       broadcastEnabled: this.config.broadcastChanges ?? false,
     };
   }

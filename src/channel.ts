@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import { ThenvoiClient } from "./thenvoi-client.js";
 import { ThenvoiRuntime } from "./runtime.js";
+import { CONTACTS_THREAD_ID } from "./contact-handler.js";
 
 // =============================================================================
 // Types for OpenClaw Plugin API
@@ -532,9 +533,9 @@ export const thenvoiChannel: OpenClawChannel = {
       clients.set(accountId, client);
       console.log(`[thenvoi:${accountId}] Client registered`);
 
-      // Contact event handling - LLM decides in hub room
+      // Contact event handling - LLM decides directly
       const contactConfig: ContactEventConfig = {
-        strategy: "hub_room",
+        strategy: "direct",
         broadcastChanges: true,
       };
 
@@ -574,20 +575,22 @@ export const thenvoiChannel: OpenClawChannel = {
                 };
 
                 // Create a dispatcher that sends replies via Thenvoi
+                // Contact events use a virtual thread — don't try to send to Thenvoi
+                const isContactThread = message.threadId === CONTACTS_THREAD_ID;
                 const dispatcher = {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   sendToolResult: (payload: any): boolean => {
-                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    if (!isContactThread) void sendReplyToThenvoi(client, message.threadId, payload);
                     return true;
                   },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   sendBlockReply: (payload: any): boolean => {
-                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    if (!isContactThread) void sendReplyToThenvoi(client, message.threadId, payload);
                     return true;
                   },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   sendFinalReply: (payload: any): boolean => {
-                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    if (!isContactThread) void sendReplyToThenvoi(client, message.threadId, payload);
                     return true;
                   },
                   waitForIdle: async (): Promise<void> => Promise.resolve(),

@@ -36,6 +36,8 @@ services:
     # === NETWORK ===
     ports:
       - "127.0.0.1:18789:18789"
+    extra_hosts:
+      - "app.thenvoi.localhost:host-gateway"
     networks:
       - openclaw-isolated
 
@@ -53,6 +55,7 @@ services:
       - NODE_ENV=production
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN_1}
       - OPENCLAW_GATEWAY_BIND=lan
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - THENVOI_API_KEY=${THENVOI_API_KEY_1}
       - THENVOI_AGENT_ID=${THENVOI_AGENT_ID_1}
