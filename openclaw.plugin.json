@@ -72,6 +72,10 @@
               "type": "string",
               "default": "https://app.thenvoi.com",
               "description": "Thenvoi REST API URL"
+            },
+            "contactPolicy": {
+              "type": "string",
+              "description": "Policy for evaluating contact requests. If set, the LLM evaluates requests against this policy. If not set, requests are auto-approved."
             }
           },
           "required": []

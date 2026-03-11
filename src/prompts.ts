@@ -185,6 +185,26 @@ Execute these tools:
 export const BASE_INSTRUCTIONS = CORE_INSTRUCTIONS + "\n" + CONTACT_INSTRUCTIONS;
 
 /**
+ * Build instructions with optional contact policy.
+ * When contactPolicy is provided, the LLM evaluates requests against it.
+ * When not provided, contacts are auto-approved (no LLM evaluation needed).
+ */
+export function buildInstructionsWithPolicy(contactPolicy?: string | null): string {
+  if (!contactPolicy) {
+    return BASE_INSTRUCTIONS;
+  }
+
+  return BASE_INSTRUCTIONS + `\n\n### Contact Request Policy
+
+When evaluating incoming contact requests, apply the following policy:
+
+${contactPolicy}
+
+Use the \`thenvoi_respond_contact_request\` tool to approve or reject each request based on this policy.
+`;
+}
+
+/**
  * Creates a complete system prompt for an agent.
  *
  * @param agentName - The agent's display name

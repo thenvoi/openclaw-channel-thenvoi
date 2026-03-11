@@ -168,6 +168,9 @@ const clients = getGatewayRegistry().clients;
 // Key: threadId, Value: { senderId, senderName }
 const lastSenderByThread: Map<string, { senderId: string; senderName: string }> = new Map();
 
+// Active contact policy (set when account starts, cleared when it stops)
+let activeContactPolicy: string | null = null;
+
 // Gateway callback for delivering inbound messages
 let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
 
@@ -533,10 +536,27 @@ export const thenvoiChannel: OpenClawChannel = {
       clients.set(accountId, client);
       console.log(`[thenvoi:${accountId}] Client registered`);
 
-      // Contact event handling - LLM decides directly
+      // Contact event handling:
+      // - With contactPolicy: dispatch to LLM for evaluation ("direct" strategy)
+      // - Without contactPolicy: auto-approve via callback ("callback" strategy)
+      activeContactPolicy = accountConfig.contactPolicy ?? null;
+      const hasPolicy = !!activeContactPolicy;
+
       const contactConfig: ContactEventConfig = {
-        strategy: "direct",
+        strategy: hasPolicy ? "direct" : "callback",
         broadcastChanges: true,
+        onEvent: hasPolicy ? undefined : async (event) => {
+          if (event.type === "contact_request_received") {
+            const payload = event.payload;
+            console.log(`[thenvoi:${accountId}] Auto-approving contact request from ${payload.from_handle} (${payload.id})`);
+            try {
+              await client.respondContactRequest("approve", undefined, payload.id);
+              console.log(`[thenvoi:${accountId}] Contact request ${payload.id} auto-approved`);
+            } catch (error) {
+              console.error(`[thenvoi:${accountId}] Failed to auto-approve contact request ${payload.id}:`, error);
+            }
+          }
+        },
       };
 
       // Create and start runtime with client
@@ -665,6 +685,7 @@ export const thenvoiChannel: OpenClawChannel = {
       }
 
       clients.delete(accountId);
+      activeContactPolicy = null;
 
       console.log(`[thenvoi:${accountId}] Disconnected from Thenvoi platform`);
     },
@@ -741,4 +762,11 @@ export function getRuntime(accountId: string = "default"): ThenvoiRuntime | unde
  */
 export function getAgentId(accountId: string = "default"): string | undefined {
   return runtimes.get(accountId)?.agentId;
+}
+
+/**
+ * Get the active contact policy (if set).
+ */
+export function getContactPolicy(): string | null {
+  return activeContactPolicy;
 }

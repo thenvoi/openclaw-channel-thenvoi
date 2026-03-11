@@ -30,9 +30,9 @@
  * @packageDocumentation
  */
 
-import { registerChannel, thenvoiChannel, setInboundCallback, setOpenClawRuntime } from "./channel.js";
+import { registerChannel, thenvoiChannel, setInboundCallback, setOpenClawRuntime, getContactPolicy } from "./channel.js";
 import { getMcpToolSchemas, executeMcpTool } from "./mcp-tools.js";
-import { BASE_INSTRUCTIONS } from "./prompts.js";
+import { buildInstructionsWithPolicy } from "./prompts.js";
 
 // =============================================================================
 // Plugin Entry Point
@@ -137,10 +137,10 @@ export default function plugin(api: OpenClawPluginApi): void {
   // The prompt itself contains "When NOT to Use" guidance for non-Thenvoi contexts
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
-      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      console.log("[thenvoi] Injecting BASE_INSTRUCTIONS");
+      const policy = getContactPolicy();
+      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider}, contactPolicy=${policy ? "set" : "not set"})`);
       return {
-        prependContext: BASE_INSTRUCTIONS,
+        prependContext: buildInstructionsWithPolicy(policy),
       };
     });
     console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
@@ -160,7 +160,7 @@ export default function plugin(api: OpenClawPluginApi): void {
 
 // Channel exports
 export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } from "./channel.js";
-export { getClient, getRuntime } from "./channel.js";
+export { getClient, getRuntime, getContactPolicy } from "./channel.js";
 
 // Runtime exports
 export { ThenvoiRuntime } from "./runtime.js";
@@ -181,6 +181,7 @@ export {
   CORE_INSTRUCTIONS,
   CONTACT_INSTRUCTIONS,
   buildSystemPrompt,
+  buildInstructionsWithPolicy,
 } from "./prompts.js";
 
 // Contact handler exports

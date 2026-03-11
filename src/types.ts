@@ -20,6 +20,12 @@ export interface ThenvoiAccountConfig {
   wsUrl?: string;
   restUrl?: string;
   /**
+   * Policy text for evaluating contact requests.
+   * When set, contact requests are dispatched to the LLM with this policy injected.
+   * When not set, contact requests are auto-approved without LLM involvement.
+   */
+  contactPolicy?: string;
+  /**
    * Configuration for contact event handling.
    * Only applicable when contactConfig.strategy is not "disabled".
    */
