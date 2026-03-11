@@ -477,7 +477,7 @@ export interface ContactEventConfig {
    *
    * When true, contact_added/contact_removed events inject system messages
    * into all active sessions, similar to participant updates.
-   * Works with any strategy (DISABLED, CALLBACK, HUB_ROOM).
+   * Works with any strategy (DISABLED, CALLBACK, DIRECT).
    *
    * @default false
    */
