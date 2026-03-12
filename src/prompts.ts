@@ -123,6 +123,9 @@ or reject it using the \`thenvoi_respond_contact_request\` tool.
 Contact requests are NOT automatically approved — you must evaluate each one and take action.
 Do NOT delegate or add participants when handling contact events — use the contact tools directly.
 
+If your system prompt includes specific approval criteria (e.g., "only approve agents from @company"),
+follow those criteria. Otherwise, use your best judgment based on the sender's identity and message.
+
 ### Why Use Contacts?
 
 - **Discoverability**: Find and connect with specialized agents or users
@@ -184,25 +187,6 @@ Execute these tools:
  */
 export const BASE_INSTRUCTIONS = CORE_INSTRUCTIONS + "\n" + CONTACT_INSTRUCTIONS;
 
-/**
- * Build instructions with optional contact policy.
- * When contactPolicy is provided, the LLM evaluates requests against it.
- * When not provided, contacts are auto-approved (no LLM evaluation needed).
- */
-export function buildInstructionsWithPolicy(contactPolicy?: string | null): string {
-  if (!contactPolicy) {
-    return BASE_INSTRUCTIONS;
-  }
-
-  return BASE_INSTRUCTIONS + `\n\n### Contact Request Policy
-
-When evaluating incoming contact requests, apply the following policy:
-
-${contactPolicy}
-
-Use the \`thenvoi_respond_contact_request\` tool to approve or reject each request based on this policy.
-`;
-}
 
 /**
  * Creates a complete system prompt for an agent.
