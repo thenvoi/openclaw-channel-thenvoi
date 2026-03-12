@@ -168,7 +168,6 @@ const clients = getGatewayRegistry().clients;
 // Key: threadId, Value: { senderId, senderName }
 const lastSenderByThread: Map<string, { senderId: string; senderName: string }> = new Map();
 
-
 // Gateway callback for delivering inbound messages
 let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
 
@@ -745,4 +744,3 @@ export function getRuntime(accountId: string = "default"): ThenvoiRuntime | unde
 export function getAgentId(accountId: string = "default"): string | undefined {
   return runtimes.get(accountId)?.agentId;
 }
-
