@@ -5,6 +5,9 @@
  * enabling bidirectional communication with the Thenvoi platform.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import type {
   ContactEventConfig,
   MentionRequest,
@@ -541,6 +544,18 @@ export const thenvoiChannel: OpenClawChannel = {
         broadcastChanges: true,
       };
 
+      // Derive state file path for contact persistence.
+      // Sanitize agentId to prevent path traversal.
+      const safeAgentId = config.agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const stateDir = accountConfig.stateDir ?? join(
+        homedir(),
+        ".openclaw",
+        "state",
+        "thenvoi",
+        safeAgentId,
+      );
+      const statePath = join(stateDir, "contact-state.json");
+
       // Create and start runtime with client
       const runtime = new ThenvoiRuntime(
         config,
@@ -650,6 +665,7 @@ export const thenvoiChannel: OpenClawChannel = {
         },
         client,
         contactConfig,
+        statePath,
       );
 
       await runtime.connect();

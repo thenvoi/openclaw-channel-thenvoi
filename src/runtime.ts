@@ -31,6 +31,7 @@ import type {
 import { ThenvoiConnectionError, ThenvoiRateLimitError } from "./types.js";
 import { ThenvoiClient } from "./thenvoi-client.js";
 import { ContactEventHandler } from "./contact-handler.js";
+import { ContactStateStore } from "./contact-state-store.js";
 
 export interface RuntimeCallbacks {
   onMessage: (message: OpenClawInboundMessage) => void;
@@ -96,6 +97,7 @@ export class ThenvoiRuntime {
   // Contact event handling
   private contactEventHandler: ContactEventHandler | null = null;
   private readonly contactConfig: ContactEventConfig;
+  private readonly contactStateStore: ContactStateStore | null;
   private pendingContactBroadcasts: string[] = [];
 
   /**
@@ -110,11 +112,13 @@ export class ThenvoiRuntime {
     callbacks: RuntimeCallbacks,
     client?: ThenvoiClient,
     contactConfig?: ContactEventConfig,
+    statePath?: string,
   ) {
     this.config = config;
     this.callbacks = callbacks;
     this.client = client ?? new ThenvoiClient(config);
     this.contactConfig = contactConfig ?? { strategy: "disabled" };
+    this.contactStateStore = statePath ? new ContactStateStore(statePath) : null;
   }
 
   // ===========================================================================
@@ -206,6 +210,12 @@ export class ThenvoiRuntime {
    */
   async disconnect(): Promise<void> {
     this.intentionalDisconnect = true;
+
+    // Persist pending broadcasts and flush contact state before disconnecting
+    if (this.contactEventHandler) {
+      this.contactEventHandler.setPendingBroadcasts(this.pendingContactBroadcasts);
+      await this.contactEventHandler.flushState();
+    }
 
     // Clear reconnect timer
     if (this.reconnectTimer) {
@@ -1146,10 +1156,17 @@ export class ThenvoiRuntime {
       return;
     }
 
+    // Reuse existing handler on reconnect to preserve in-memory dedup state
+    if (this.contactEventHandler) {
+      console.log("[thenvoi] Reusing existing contact event handler on reconnect");
+      return;
+    }
+
     // Create handler with callbacks
     this.contactEventHandler = new ContactEventHandler({
       config: this.contactConfig,
       client: this.client,
+      stateStore: this.contactStateStore,
       onBroadcast: this.contactConfig.broadcastChanges
         ? (msg) => this.queueContactBroadcast(msg)
         : undefined,
@@ -1157,6 +1174,16 @@ export class ThenvoiRuntime {
         ? (threadId, payload) => this.dispatchContactEvent(threadId, payload)
         : undefined,
     });
+
+    // Load persisted state before processing events
+    await this.contactEventHandler.loadPersistedState();
+
+    // Restore pending broadcasts from persisted state
+    const restoredBroadcasts = this.contactEventHandler.getRestoredBroadcasts();
+    if (restoredBroadcasts.length > 0) {
+      this.pendingContactBroadcasts.push(...restoredBroadcasts);
+      console.log(`[thenvoi] Restored ${restoredBroadcasts.length} pending broadcasts`);
+    }
 
     console.log(
       `[thenvoi] Contact handling enabled: strategy=${strategy}, broadcast=${this.contactConfig.broadcastChanges ?? false}`,
