@@ -72,7 +72,7 @@ export class ThenvoiClient {
 
     const response = await this.request<{ data: SendMessageResponse }>(
       "POST",
-      `/api/v1/agent/chats/${chatId}/messages`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/messages`,
       { message },
     );
     return response.data;
@@ -115,7 +115,7 @@ export class ThenvoiClient {
 
     const response = await this.request<{ data: SendEventResponse }>(
       "POST",
-      `/api/v1/agent/chats/${chatId}/events`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/events`,
       { event },
     );
     return response.data;
@@ -127,7 +127,7 @@ export class ThenvoiClient {
   async markMessageProcessing(chatId: string, messageId: string): Promise<void> {
     await this.request(
       "POST",
-      `/api/v1/agent/chats/${chatId}/messages/${messageId}/processing`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/processing`,
     );
   }
 
@@ -137,7 +137,7 @@ export class ThenvoiClient {
   async markMessageProcessed(chatId: string, messageId: string): Promise<void> {
     await this.request(
       "POST",
-      `/api/v1/agent/chats/${chatId}/messages/${messageId}/processed`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/processed`,
     );
   }
 
@@ -151,7 +151,7 @@ export class ThenvoiClient {
   ): Promise<void> {
     await this.request(
       "POST",
-      `/api/v1/agent/chats/${chatId}/messages/${messageId}/failed`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/failed`,
       { error },
     );
   }
@@ -167,7 +167,7 @@ export class ThenvoiClient {
   async getNextMessage(chatId?: string): Promise<NextMessageResponse | null> {
     try {
       const path = chatId
-        ? `/api/v1/agent/chats/${chatId}/messages/next`
+        ? `/api/v1/agent/chats/${encodeURIComponent(chatId)}/messages/next`
         : `/api/v1/agent/messages/next`;
 
       const response = await this.request<{ data: NextMessageResponse | null } | NoMessageResponse>(
@@ -175,7 +175,9 @@ export class ThenvoiClient {
         path,
       );
 
-      console.log(`[thenvoi] getNextMessage response:`, JSON.stringify(response, null, 2));
+      // Log only message availability, not full content
+      const hasMessage = response && !("message" in response && response.message === "no_pending_messages");
+      console.log(`[thenvoi] getNextMessage: ${hasMessage ? "message available" : "no pending messages"}`);
 
       // Handle empty response (204 No Content or empty body)
       if (response === undefined || response === null) {
@@ -259,7 +261,7 @@ export class ThenvoiClient {
 
     return this.request<AddParticipantResponse>(
       "POST",
-      `/api/v1/agent/chats/${chatId}/participants`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/participants`,
       request,
     );
   }
@@ -280,7 +282,7 @@ export class ThenvoiClient {
   async getParticipants(chatId: string): Promise<Participant[]> {
     const response = await this.request<{ data: Participant[] }>(
       "GET",
-      `/api/v1/agent/chats/${chatId}/participants`,
+      `/api/v1/agent/chats/${encodeURIComponent(chatId)}/participants`,
     );
     return response.data;
   }
@@ -511,8 +513,10 @@ export class ThenvoiClient {
       }
 
       const errorBody = await response.text();
+      // Log full error for debugging but only expose status to callers
+      console.error(`[thenvoi] HTTP ${response.status} error:`, errorBody);
       throw new ThenvoiError(
-        `HTTP ${response.status}: ${errorBody}`,
+        `HTTP ${response.status}: request failed`,
         "HTTP_ERROR",
         response.status,
       );

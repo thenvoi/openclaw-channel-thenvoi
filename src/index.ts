@@ -96,6 +96,7 @@ export default function plugin(api: OpenClawPluginApi): void {
   registerChannel(api);
 
   // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const registerTool = (api as any).registerTool;
   if (registerTool) {
     const toolSchemas = getMcpToolSchemas();
@@ -108,11 +109,11 @@ export default function plugin(api: OpenClawPluginApi): void {
         // OpenClaw execute signature: (toolCallId: string, input: object) => AgentToolResult
         // Result format: { content: [{ type: "text", text: "..." }], details: payload }
         execute: async (_toolCallId: unknown, input: unknown) => {
-          console.log(`[thenvoi] Executing tool ${tool.name} with input:`, JSON.stringify(input));
+          console.log(`[thenvoi] Executing tool ${tool.name}`);
           try {
             const result = await executeMcpTool(tool.name, input ?? {});
             const resultStr = JSON.stringify(result, null, 2);
-            console.log(`[thenvoi] Tool ${tool.name} returned:`, resultStr);
+            console.log(`[thenvoi] Tool ${tool.name} completed`);
 
             // Return in OpenClaw's expected AgentToolResult format
             return {
