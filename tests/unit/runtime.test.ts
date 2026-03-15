@@ -452,10 +452,16 @@ describe("ThenvoiRuntime", () => {
       expect(handler).toBeDefined();
 
       const flushSpy = vi.spyOn(handler, "flushState").mockResolvedValue(undefined);
+      const setBroadcastsSpy = vi.spyOn(handler as any, "setPendingBroadcasts");
 
       await contactRuntime.disconnect();
 
+      expect(setBroadcastsSpy).toHaveBeenCalledTimes(1);
       expect(flushSpy).toHaveBeenCalledTimes(1);
+      // setPendingBroadcasts should be called before flushState
+      const setBroadcastsOrder = setBroadcastsSpy.mock.invocationCallOrder[0];
+      const flushOrder = flushSpy.mock.invocationCallOrder[0];
+      expect(setBroadcastsOrder).toBeLessThan(flushOrder);
     });
   });
 

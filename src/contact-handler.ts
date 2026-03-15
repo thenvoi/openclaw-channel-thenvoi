@@ -65,12 +65,63 @@ export class ContactEventHandler {
   // Used to enrich ContactRequestUpdatedEvent with sender info
   private readonly requestCache: Map<string, Record<string, string | undefined>> = new Map();
 
+  // Hub room state (used by hub_room strategy, INT-187)
+  private _hubRoomId: string | null = null;
+  private _hubRoomInitialized: boolean = false;
+
+  // Pending broadcast messages (persisted across restarts)
+  private _pendingBroadcasts: string[] = [];
+
   constructor(options: ContactEventHandlerOptions) {
     this.config = options.config;
     this.client = options.client;
     this.stateStore = options.stateStore;
     this.onBroadcast = options.onBroadcast;
     this.onDispatch = options.onDispatch;
+  }
+
+  // ===========================================================================
+  // Hub Room State
+  // ===========================================================================
+
+  getHubRoomId(): string | null {
+    return this._hubRoomId;
+  }
+
+  setHubRoomId(roomId: string | null): void {
+    this._hubRoomId = roomId;
+    this.persistState();
+  }
+
+  isHubRoomInitialized(): boolean {
+    return this._hubRoomInitialized;
+  }
+
+  setHubRoomInitialized(initialized: boolean): void {
+    this._hubRoomInitialized = initialized;
+    this.persistState();
+  }
+
+  // ===========================================================================
+  // Pending Broadcast Persistence
+  // ===========================================================================
+
+  /**
+   * Store pending broadcasts for persistence before shutdown.
+   * Called by runtime before flushing state.
+   */
+  setPendingBroadcasts(messages: string[]): void {
+    this._pendingBroadcasts = [...messages];
+  }
+
+  /**
+   * Retrieve broadcasts restored from persisted state and clear them.
+   * Called by runtime after loading state on startup.
+   */
+  getRestoredBroadcasts(): string[] {
+    const messages = [...this._pendingBroadcasts];
+    this._pendingBroadcasts = [];
+    return messages;
   }
 
   /**
@@ -94,6 +145,30 @@ export class ContactEventHandler {
       }
       console.log(`[thenvoi] Restored ${state.processedEventKeys.length} dedup keys from persisted state`);
     }
+
+    // Restore request cache
+    if (state.requestCache?.length) {
+      for (const entry of state.requestCache) {
+        this.requestCache.set(entry.key, entry.value);
+      }
+      console.log(`[thenvoi] Restored ${state.requestCache.length} request cache entries from persisted state`);
+    }
+
+    // Restore hub room state
+    if (state.hubRoomId !== undefined) {
+      this._hubRoomId = state.hubRoomId ?? null;
+      console.log(`[thenvoi] Restored hub room ID: ${this._hubRoomId}`);
+    }
+    if (state.hubRoomInitialized) {
+      this._hubRoomInitialized = true;
+      console.log("[thenvoi] Restored hub room initialized flag");
+    }
+
+    // Restore pending broadcasts
+    if (state.pendingBroadcasts?.length) {
+      this._pendingBroadcasts = state.pendingBroadcasts;
+      console.log(`[thenvoi] Restored ${state.pendingBroadcasts.length} pending broadcasts from persisted state`);
+    }
   }
 
   /**
@@ -106,6 +181,12 @@ export class ContactEventHandler {
 
     this.stateStore.save({
       processedEventKeys: Array.from(this.processedEvents.keys()),
+      requestCache: Array.from(this.requestCache.entries()).map(
+        ([key, value]) => ({ key, value }),
+      ),
+      hubRoomId: this._hubRoomId,
+      hubRoomInitialized: this._hubRoomInitialized,
+      pendingBroadcasts: this._pendingBroadcasts,
     });
   }
 
@@ -476,7 +557,11 @@ export class ContactEventHandler {
     return {
       strategy: this.config.strategy ?? "disabled",
       dedupCacheSize: this.processedEvents.size,
+      requestCacheSize: this.requestCache.size,
+      hubRoomId: this._hubRoomId,
+      hubRoomInitialized: this._hubRoomInitialized,
       broadcastEnabled: this.config.broadcastChanges ?? false,
+      pendingBroadcastCount: this._pendingBroadcasts.length,
     };
   }
 }

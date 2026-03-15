@@ -52,6 +52,40 @@ describe("ContactStateStore", () => {
       expect(result).toEqual(state);
     });
 
+    it("should return full state with all optional fields", async () => {
+      const state: ContactPersistedState = {
+        processedEventKeys: ["key1"],
+        requestCache: [{ key: "req-1", value: { from_handle: "@alice", from_name: "Alice" } }],
+        hubRoomId: "hub-room-123",
+        hubRoomInitialized: true,
+        pendingBroadcasts: ["@alice is now a contact"],
+        savedAt: "2026-03-08T00:00:00.000Z",
+      };
+      vi.mocked(readFile).mockResolvedValue(JSON.stringify(state));
+
+      const result = await store.load();
+      expect(result).toEqual(state);
+    });
+
+    it("should sanitize invalid optional field types", async () => {
+      const state = {
+        processedEventKeys: ["key1"],
+        requestCache: "not-an-array",
+        hubRoomId: 12345,
+        hubRoomInitialized: "yes",
+        pendingBroadcasts: { bad: true },
+        savedAt: "2026-03-08T00:00:00.000Z",
+      };
+      vi.mocked(readFile).mockResolvedValue(JSON.stringify(state));
+
+      const result = await store.load();
+      expect(result).not.toBeNull();
+      expect(result!.requestCache).toBeUndefined();
+      expect(result!.hubRoomId).toBeUndefined();
+      expect(result!.hubRoomInitialized).toBeUndefined();
+      expect(result!.pendingBroadcasts).toBeUndefined();
+    });
+
     it("should return null when processedEventKeys is missing or not an array", async () => {
       vi.mocked(readFile).mockResolvedValue(JSON.stringify({
         savedAt: "2026-03-08T00:00:00Z",
@@ -150,6 +184,41 @@ describe("ContactStateStore", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mkdir).toHaveBeenCalledWith("/tmp", { recursive: true });
+    });
+
+    it("should persist all optional fields", async () => {
+      store.save({
+        processedEventKeys: ["key1"],
+        requestCache: [{ key: "req-1", value: { from_handle: "@alice" } }],
+        hubRoomId: "hub-room-123",
+        hubRoomInitialized: true,
+        pendingBroadcasts: ["@alice is now a contact"],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const written = JSON.parse(
+        vi.mocked(writeFile).mock.calls[0][1] as string,
+      ) as ContactPersistedState;
+      expect(written.processedEventKeys).toEqual(["key1"]);
+      expect(written.requestCache).toEqual([{ key: "req-1", value: { from_handle: "@alice" } }]);
+      expect(written.hubRoomId).toBe("hub-room-123");
+      expect(written.hubRoomInitialized).toBe(true);
+      expect(written.pendingBroadcasts).toEqual(["@alice is now a contact"]);
+    });
+
+    it("should trim request cache to max 1000", async () => {
+      const cache = Array.from({ length: 1200 }, (_, i) => ({
+        key: `req-${i}`,
+        value: { from_handle: `@user-${i}` },
+      }));
+      store.save({ processedEventKeys: [], requestCache: cache });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const written = JSON.parse(
+        vi.mocked(writeFile).mock.calls[0][1] as string,
+      ) as ContactPersistedState;
+      expect(written.requestCache).toHaveLength(1000);
+      expect(written.requestCache![0].key).toBe("req-200");
     });
   });
 

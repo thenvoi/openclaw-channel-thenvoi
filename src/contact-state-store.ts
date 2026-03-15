@@ -12,6 +12,14 @@ import { dirname } from "node:path";
 export interface ContactPersistedState {
   /** Dedup cache keys (bounded subset of recent entries). */
   processedEventKeys: string[];
+  /** Request cache entries for enriching update events. */
+  requestCache?: Array<{ key: string; value: Record<string, string | undefined> }>;
+  /** Hub room ID for the contact reasoning room (INT-187). */
+  hubRoomId?: string | null;
+  /** Whether the hub room has been initialized with a system prompt. */
+  hubRoomInitialized?: boolean;
+  /** Broadcast messages queued but not yet delivered. */
+  pendingBroadcasts?: string[];
   /** ISO timestamp of last save. */
   savedAt: string;
 }
@@ -60,6 +68,20 @@ export class ContactStateStore {
         parsed.savedAt = "unknown";
       }
 
+      // Sanitize optional fields — treat unexpected types as missing
+      if (parsed.requestCache !== undefined && !Array.isArray(parsed.requestCache)) {
+        parsed.requestCache = undefined;
+      }
+      if (parsed.pendingBroadcasts !== undefined && !Array.isArray(parsed.pendingBroadcasts)) {
+        parsed.pendingBroadcasts = undefined;
+      }
+      if (parsed.hubRoomId !== undefined && parsed.hubRoomId !== null && typeof parsed.hubRoomId !== "string") {
+        parsed.hubRoomId = undefined;
+      }
+      if (parsed.hubRoomInitialized !== undefined && typeof parsed.hubRoomInitialized !== "boolean") {
+        parsed.hubRoomInitialized = undefined;
+      }
+
       console.log(
         `[thenvoi:state] Loaded state: dedupKeys=${parsed.processedEventKeys.length}, ` +
         `savedAt=${parsed.savedAt}`,
@@ -81,9 +103,11 @@ export class ContactStateStore {
    * The store generates the `savedAt` timestamp automatically.
    */
   save(state: Omit<ContactPersistedState, "savedAt">): void {
-    // Trim dedup keys to bounded size (keep most recent)
+    // Trim caches to bounded size (keep most recent)
     const trimmedState: ContactPersistedState = {
+      ...state,
       processedEventKeys: state.processedEventKeys.slice(-MAX_PERSISTED_DEDUP_KEYS),
+      requestCache: state.requestCache?.slice(-MAX_PERSISTED_DEDUP_KEYS),
       savedAt: new Date().toISOString(),
     };
 

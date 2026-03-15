@@ -209,8 +209,9 @@ export class ThenvoiRuntime {
   async disconnect(): Promise<void> {
     this.intentionalDisconnect = true;
 
-    // Flush contact state before disconnecting
+    // Persist pending broadcasts and flush contact state before disconnecting
     if (this.contactEventHandler) {
+      this.contactEventHandler.setPendingBroadcasts(this.pendingContactBroadcasts);
       await this.contactEventHandler.flushState();
     }
 
@@ -1163,8 +1164,15 @@ export class ThenvoiRuntime {
         : undefined,
     });
 
-    // Load persisted state (dedup cache) before processing events
+    // Load persisted state before processing events
     await this.contactEventHandler.loadPersistedState();
+
+    // Restore pending broadcasts from persisted state
+    const restoredBroadcasts = this.contactEventHandler.getRestoredBroadcasts();
+    if (restoredBroadcasts.length > 0) {
+      this.pendingContactBroadcasts.push(...restoredBroadcasts);
+      console.log(`[thenvoi] Restored ${restoredBroadcasts.length} pending broadcasts`);
+    }
 
     console.log(
       `[thenvoi] Contact handling enabled: strategy=${strategy}, broadcast=${this.contactConfig.broadcastChanges ?? false}`,
