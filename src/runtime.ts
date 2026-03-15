@@ -1144,6 +1144,12 @@ export class ThenvoiRuntime {
       return;
     }
 
+    // Reuse existing handler on reconnect to preserve in-memory dedup state
+    if (this.contactEventHandler) {
+      console.log("[thenvoi] Reusing existing contact event handler on reconnect");
+      return;
+    }
+
     // Create handler with callbacks
     this.contactEventHandler = new ContactEventHandler({
       config: this.contactConfig,

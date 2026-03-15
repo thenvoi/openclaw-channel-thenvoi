@@ -16,8 +16,8 @@ export interface ContactPersistedState {
   savedAt: string;
 }
 
-/** Maximum number of dedup keys to persist. */
-const MAX_PERSISTED_DEDUP_KEYS = 200;
+/** Maximum number of dedup keys to persist (matches in-memory MAX_DEDUP_CACHE_SIZE). */
+const MAX_PERSISTED_DEDUP_KEYS = 1000;
 
 /** Default debounce interval for writes (ms). */
 const DEFAULT_DEBOUNCE_MS = 1000;

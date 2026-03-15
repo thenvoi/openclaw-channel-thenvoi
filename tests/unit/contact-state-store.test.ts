@@ -105,17 +105,17 @@ describe("ContactStateStore", () => {
       );
     });
 
-    it("should trim dedup keys to max 200", async () => {
-      const keys = Array.from({ length: 300 }, (_, i) => `key-${i}`);
+    it("should trim dedup keys to max 1000", async () => {
+      const keys = Array.from({ length: 1200 }, (_, i) => `key-${i}`);
       store.save({ processedEventKeys: keys });
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const written = JSON.parse(
         vi.mocked(writeFile).mock.calls[0][1] as string,
       ) as ContactPersistedState;
-      expect(written.processedEventKeys).toHaveLength(200);
-      // Should keep the most recent (last 200)
-      expect(written.processedEventKeys[0]).toBe("key-100");
+      expect(written.processedEventKeys).toHaveLength(1000);
+      // Should keep the most recent (last 1000)
+      expect(written.processedEventKeys[0]).toBe("key-200");
     });
 
     it("should generate savedAt timestamp automatically", async () => {
