@@ -195,6 +195,8 @@ export class ContactEventHandler {
    * Call on shutdown to avoid losing state.
    */
   async flushState(): Promise<void> {
+    // Ensure latest state (including any setPendingBroadcasts) is queued before flushing
+    this.persistState();
     await this.stateStore?.flush();
   }
 

@@ -343,6 +343,30 @@ describe("ContactEventHandler persistence", () => {
       expect(store.flush).toHaveBeenCalled();
     });
 
+    it("should persist latest state before flushing so pending broadcasts are written", async () => {
+      const store = createMockStore();
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        stateStore: store,
+        onDispatch: vi.fn(),
+      });
+
+      // Set broadcasts without any other persistState trigger
+      handler.setPendingBroadcasts(["msg-before-flush"]);
+      await handler.flushState();
+
+      // save() should have been called with the broadcasts before flush()
+      expect(store.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pendingBroadcasts: ["msg-before-flush"],
+        }),
+      );
+      const saveOrder = vi.mocked(store.save).mock.invocationCallOrder[0];
+      const flushOrder = vi.mocked(store.flush).mock.invocationCallOrder[0];
+      expect(saveOrder).toBeLessThan(flushOrder);
+    });
+
     it("should be safe without a state store", async () => {
       const handler = new ContactEventHandler({
         config: { strategy: "direct" },
