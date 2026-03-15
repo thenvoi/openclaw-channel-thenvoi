@@ -16,6 +16,7 @@ import type {
   ContactRequestReceivedPayload,
   MessageCreatedPayload,
 } from "./types.js";
+import type { ContactStateStore } from "./contact-state-store.js";
 
 // Maximum size of deduplication cache
 const MAX_DEDUP_CACHE_SIZE = 1000;
@@ -39,6 +40,7 @@ export type BroadcastCallback = (message: string) => void;
 export interface ContactEventHandlerOptions {
   config: ContactEventConfig;
   client: ThenvoiClient;
+  stateStore?: ContactStateStore | null;
   onBroadcast?: BroadcastCallback;
   onDispatch?: ContactEventDispatchCallback;
 }
@@ -52,6 +54,7 @@ export interface ContactEventHandlerOptions {
 export class ContactEventHandler {
   private readonly config: ContactEventConfig;
   private readonly client: ThenvoiClient;
+  private readonly stateStore?: ContactStateStore | null;
   private readonly onBroadcast?: BroadcastCallback;
   private readonly onDispatch?: ContactEventDispatchCallback;
 
@@ -62,11 +65,101 @@ export class ContactEventHandler {
   // Used to enrich ContactRequestUpdatedEvent with sender info
   private readonly requestCache: Map<string, Record<string, string | undefined>> = new Map();
 
+  // Pending broadcast messages (persisted across restarts)
+  private _pendingBroadcasts: string[] = [];
+
   constructor(options: ContactEventHandlerOptions) {
     this.config = options.config;
     this.client = options.client;
+    this.stateStore = options.stateStore;
     this.onBroadcast = options.onBroadcast;
     this.onDispatch = options.onDispatch;
+  }
+
+  // ===========================================================================
+  // Pending Broadcast Persistence
+  // ===========================================================================
+
+  /**
+   * Store pending broadcasts for persistence before shutdown.
+   * Called by runtime before flushing state.
+   */
+  setPendingBroadcasts(messages: string[]): void {
+    this._pendingBroadcasts = [...messages];
+  }
+
+  /**
+   * Retrieve broadcasts restored from persisted state and clear them.
+   * Called by runtime after loading state on startup.
+   */
+  getRestoredBroadcasts(): string[] {
+    const messages = [...this._pendingBroadcasts];
+    this._pendingBroadcasts = [];
+    return messages;
+  }
+
+  /**
+   * Load persisted state from the state store.
+   * Restores dedup cache from previous run.
+   */
+  async loadPersistedState(): Promise<void> {
+    if (!this.stateStore) {
+      return;
+    }
+
+    const state = await this.stateStore.load();
+    if (!state) {
+      return;
+    }
+
+    // Restore dedup cache
+    if (state.processedEventKeys?.length) {
+      for (const key of state.processedEventKeys) {
+        this.processedEvents.set(key, true);
+      }
+      console.log(`[thenvoi] Restored ${state.processedEventKeys.length} dedup keys from persisted state`);
+    }
+
+    // Restore request cache
+    if (state.requestCache?.length) {
+      for (const entry of state.requestCache) {
+        this.requestCache.set(entry.key, entry.value);
+      }
+      console.log(`[thenvoi] Restored ${state.requestCache.length} request cache entries from persisted state`);
+    }
+
+    // Restore pending broadcasts
+    if (state.pendingBroadcasts?.length) {
+      this._pendingBroadcasts = state.pendingBroadcasts;
+      console.log(`[thenvoi] Restored ${state.pendingBroadcasts.length} pending broadcasts from persisted state`);
+    }
+  }
+
+  /**
+   * Persist current state to the state store.
+   */
+  private persistState(): void {
+    if (!this.stateStore) {
+      return;
+    }
+
+    this.stateStore.save({
+      processedEventKeys: Array.from(this.processedEvents.keys()),
+      requestCache: Array.from(this.requestCache.entries()).map(
+        ([key, value]) => ({ key, value }),
+      ),
+      pendingBroadcasts: this._pendingBroadcasts,
+    });
+  }
+
+  /**
+   * Flush persisted state to disk immediately.
+   * Call on shutdown to avoid losing state.
+   */
+  async flushState(): Promise<void> {
+    // Ensure latest state (including any setPendingBroadcasts) is queued before flushing
+    this.persistState();
+    await this.stateStore?.flush();
   }
 
   /**
@@ -335,6 +428,8 @@ export class ContactEventHandler {
         this.processedEvents.delete(firstKey);
       }
     }
+
+    this.persistState();
   }
 
   /**
@@ -426,7 +521,9 @@ export class ContactEventHandler {
     return {
       strategy: this.config.strategy ?? "disabled",
       dedupCacheSize: this.processedEvents.size,
+      requestCacheSize: this.requestCache.size,
       broadcastEnabled: this.config.broadcastChanges ?? false,
+      pendingBroadcastCount: this._pendingBroadcasts.length,
     };
   }
 }
