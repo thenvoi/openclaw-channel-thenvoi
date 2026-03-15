@@ -550,7 +550,7 @@ export const thenvoiChannel: OpenClawChannel = {
       const stateDir = accountConfig.stateDir ?? join(
         homedir(),
         ".openclaw",
-        "plugins",
+        "state",
         "thenvoi",
         safeAgentId,
       );

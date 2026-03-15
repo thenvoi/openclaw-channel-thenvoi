@@ -21,8 +21,8 @@ export interface ThenvoiAccountConfig {
   restUrl?: string;
   /**
    * Directory for persisted state files (e.g. dedup cache).
-   * Defaults to ~/.openclaw/plugins/thenvoi/{agentId}/.
-   * Override in Docker or when home directory is not writable.
+   * Defaults to ~/.openclaw/state/thenvoi/{agentId}/.
+   * Override when home directory is not writable.
    */
   stateDir?: string;
   /**

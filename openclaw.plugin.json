@@ -75,7 +75,7 @@
             },
             "stateDir": {
               "type": "string",
-              "description": "Directory for persisted state files. Defaults to ~/.openclaw/plugins/thenvoi/{agentId}/. Override in Docker or when home directory is not writable."
+              "description": "Directory for persisted state files. Defaults to ~/.openclaw/state/thenvoi/{agentId}/. Override when home directory is not writable."
             }
           },
           "required": []
