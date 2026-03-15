@@ -1,0 +1,164 @@
+/**
+ * Unit tests for ContactEventHandler persistence behavior.
+ *
+ * Tests that the handler loads/saves state via ContactStateStore
+ * and persists dedup cache across restarts.
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ContactEventHandler } from "../../src/contact-handler.js";
+import type { ContactStateStore } from "../../src/contact-state-store.js";
+import type { ThenvoiClient } from "../../src/thenvoi-client.js";
+import type { ContactEvent } from "../../src/types.js";
+
+function createMockClient(overrides?: Partial<ThenvoiClient>): ThenvoiClient {
+  return {
+    getParticipants: vi.fn().mockResolvedValue([]),
+    createChat: vi.fn().mockResolvedValue({ id: "new-room" }),
+    sendEvent: vi.fn().mockResolvedValue({}),
+    listContactRequests: vi.fn().mockResolvedValue({ received: [], sent: [] }),
+    ...overrides,
+  } as unknown as ThenvoiClient;
+}
+
+function createMockStore(overrides?: Partial<ContactStateStore>): ContactStateStore {
+  return {
+    load: vi.fn().mockResolvedValue(null),
+    save: vi.fn(),
+    flush: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as ContactStateStore;
+}
+
+describe("ContactEventHandler persistence", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  describe("loadPersistedState", () => {
+    it("should restore dedup cache keys", async () => {
+      const store = createMockStore({
+        load: vi.fn().mockResolvedValue({
+          processedEventKeys: ["contact_added:abc-123"],
+          savedAt: "2026-03-08T00:00:00Z",
+        }),
+      });
+
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        stateStore: store,
+        onDispatch: vi.fn(),
+      });
+
+      await handler.loadPersistedState();
+
+      // The dedup cache should skip a duplicate event
+      const event: ContactEvent = {
+        type: "contact_added",
+        payload: {
+          id: "abc-123",
+          handle: "@test",
+          name: "Test",
+          type: "User",
+          inserted_at: "2026-03-08T00:00:00Z",
+        },
+      };
+
+      await handler.handle(event);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Skipping duplicate"),
+      );
+    });
+
+    it("should be a no-op without a state store", async () => {
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        onDispatch: vi.fn(),
+      });
+
+      // Should not throw
+      await handler.loadPersistedState();
+    });
+
+    it("should be a no-op when store returns null", async () => {
+      const store = createMockStore({
+        load: vi.fn().mockResolvedValue(null),
+      });
+
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        stateStore: store,
+        onDispatch: vi.fn(),
+      });
+
+      await handler.loadPersistedState();
+      expect(store.load).toHaveBeenCalled();
+    });
+  });
+
+  describe("markProcessed persistence", () => {
+    it("should persist state after marking event as processed", async () => {
+      const store = createMockStore();
+
+      const onDispatch = vi.fn().mockResolvedValue(undefined);
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        stateStore: store,
+        onDispatch,
+      });
+
+      const event: ContactEvent = {
+        type: "contact_added",
+        payload: {
+          id: "new-contact",
+          handle: "@newuser",
+          name: "New User",
+          type: "User",
+          inserted_at: "2026-03-08T00:00:00Z",
+        },
+      };
+
+      await handler.handle(event);
+
+      // State should have been persisted with the new dedup key
+      expect(store.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          processedEventKeys: expect.arrayContaining(["contact_added:new-contact"]),
+        }),
+      );
+    });
+  });
+
+  describe("flushState", () => {
+    it("should flush the state store", async () => {
+      const store = createMockStore();
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        stateStore: store,
+        onDispatch: vi.fn(),
+      });
+
+      await handler.flushState();
+      expect(store.flush).toHaveBeenCalled();
+    });
+
+    it("should be safe without a state store", async () => {
+      const handler = new ContactEventHandler({
+        config: { strategy: "direct" },
+        client: createMockClient(),
+        onDispatch: vi.fn(),
+      });
+
+      // Should not throw
+      await handler.flushState();
+    });
+  });
+});

@@ -186,6 +186,10 @@ export {
 export { ContactEventHandler, CONTACTS_THREAD_ID } from "./contact-handler.js";
 export type { ContactEventDispatchCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
 
+// Contact state persistence exports
+export { ContactStateStore } from "./contact-state-store.js";
+export type { ContactPersistedState } from "./contact-state-store.js";
+
 // Type exports
 export type {
   // Configuration

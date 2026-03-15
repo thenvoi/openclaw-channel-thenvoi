@@ -16,6 +16,7 @@ import type {
   ContactRequestReceivedPayload,
   MessageCreatedPayload,
 } from "./types.js";
+import type { ContactStateStore } from "./contact-state-store.js";
 
 // Maximum size of deduplication cache
 const MAX_DEDUP_CACHE_SIZE = 1000;
@@ -39,6 +40,7 @@ export type BroadcastCallback = (message: string) => void;
 export interface ContactEventHandlerOptions {
   config: ContactEventConfig;
   client: ThenvoiClient;
+  stateStore?: ContactStateStore;
   onBroadcast?: BroadcastCallback;
   onDispatch?: ContactEventDispatchCallback;
 }
@@ -52,6 +54,7 @@ export interface ContactEventHandlerOptions {
 export class ContactEventHandler {
   private readonly config: ContactEventConfig;
   private readonly client: ThenvoiClient;
+  private readonly stateStore?: ContactStateStore;
   private readonly onBroadcast?: BroadcastCallback;
   private readonly onDispatch?: ContactEventDispatchCallback;
 
@@ -65,8 +68,54 @@ export class ContactEventHandler {
   constructor(options: ContactEventHandlerOptions) {
     this.config = options.config;
     this.client = options.client;
+    this.stateStore = options.stateStore;
     this.onBroadcast = options.onBroadcast;
     this.onDispatch = options.onDispatch;
+  }
+
+  /**
+   * Load persisted state from the state store.
+   * Restores dedup cache from previous run.
+   */
+  async loadPersistedState(): Promise<void> {
+    if (!this.stateStore) {
+      return;
+    }
+
+    const state = await this.stateStore.load();
+    if (!state) {
+      return;
+    }
+
+    // Restore dedup cache
+    if (state.processedEventKeys?.length) {
+      for (const key of state.processedEventKeys) {
+        this.processedEvents.set(key, true);
+      }
+      console.log(`[thenvoi] Restored ${state.processedEventKeys.length} dedup keys from persisted state`);
+    }
+  }
+
+  /**
+   * Persist current state to the state store.
+   */
+  private persistState(): void {
+    if (!this.stateStore) {
+      return;
+    }
+
+    this.stateStore.save({
+      processedEventKeys: Array.from(this.processedEvents.keys()),
+      savedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Flush persisted state to disk immediately.
+   * Call on shutdown to avoid losing state.
+   */
+  async flushState(): Promise<void> {
+    await this.stateStore?.flush();
   }
 
   /**
@@ -335,6 +384,8 @@ export class ContactEventHandler {
         this.processedEvents.delete(firstKey);
       }
     }
+
+    this.persistState();
   }
 
   /**
