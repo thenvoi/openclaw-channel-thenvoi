@@ -465,6 +465,28 @@ describe("ThenvoiRuntime", () => {
     });
   });
 
+  describe("processedMessageIds eviction", () => {
+    it("should evict oldest entry when exceeding MAX_PROCESSED_MESSAGE_IDS", () => {
+      const evictionRuntime = new ThenvoiRuntime(mockThenvoiConfig, callbacks, mockClient);
+
+      // Fill to the limit (10,000)
+      for (let i = 0; i < 10000; i++) {
+        (evictionRuntime as any).trackProcessedMessage(`msg-${i}`);
+      }
+      expect(evictionRuntime.getProcessedMessageCount()).toBe(10000);
+
+      // Add one more — should evict the oldest (msg-0)
+      (evictionRuntime as any).trackProcessedMessage("msg-new");
+      expect(evictionRuntime.getProcessedMessageCount()).toBe(10000);
+
+      // Oldest should be gone, newest should be present
+      const ids: Set<string> = (evictionRuntime as any).processedMessageIds;
+      expect(ids.has("msg-0")).toBe(false);
+      expect(ids.has("msg-1")).toBe(true);
+      expect(ids.has("msg-new")).toBe(true);
+    });
+  });
+
   describe("message queuing during sync", () => {
     it("should queue WS messages that arrive during sync and process after", async () => {
       // This test verifies the Python SDK-aligned behavior:

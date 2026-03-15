@@ -516,7 +516,7 @@ export class ThenvoiClient {
       // Log full error for debugging but only expose status to callers
       console.error(`[thenvoi] HTTP ${response.status} error:`, errorBody);
       throw new ThenvoiError(
-        `HTTP ${response.status}: request failed`,
+        `HTTP ${response.status}: request failed (see logs for details)`,
         "HTTP_ERROR",
         response.status,
       );
