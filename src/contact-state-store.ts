@@ -14,10 +14,6 @@ export interface ContactPersistedState {
   processedEventKeys: string[];
   /** Request cache entries for enriching update events. */
   requestCache?: Array<{ key: string; value: Record<string, string | undefined> }>;
-  /** Hub room ID for the contact reasoning room (INT-187). */
-  hubRoomId?: string | null;
-  /** Whether the hub room has been initialized with a system prompt. */
-  hubRoomInitialized?: boolean;
   /** Broadcast messages queued but not yet delivered. */
   pendingBroadcasts?: string[];
   /** ISO timestamp of last save. */
@@ -74,12 +70,6 @@ export class ContactStateStore {
       }
       if (parsed.pendingBroadcasts !== undefined && !Array.isArray(parsed.pendingBroadcasts)) {
         parsed.pendingBroadcasts = undefined;
-      }
-      if (parsed.hubRoomId !== undefined && parsed.hubRoomId !== null && typeof parsed.hubRoomId !== "string") {
-        parsed.hubRoomId = undefined;
-      }
-      if (parsed.hubRoomInitialized !== undefined && typeof parsed.hubRoomInitialized !== "boolean") {
-        parsed.hubRoomInitialized = undefined;
       }
 
       console.log(

@@ -136,82 +136,6 @@ describe("ContactEventHandler persistence", () => {
     });
   });
 
-  describe("hub room state", () => {
-    it("should persist hub room ID on set", () => {
-      const store = createMockStore();
-      const handler = new ContactEventHandler({
-        config: { strategy: "direct" },
-        client: createMockClient(),
-        stateStore: store,
-        onDispatch: vi.fn(),
-      });
-
-      handler.setHubRoomId("hub-room-abc");
-      expect(handler.getHubRoomId()).toBe("hub-room-abc");
-      expect(store.save).toHaveBeenCalledWith(
-        expect.objectContaining({ hubRoomId: "hub-room-abc" }),
-      );
-    });
-
-    it("should persist hub room initialized flag", () => {
-      const store = createMockStore();
-      const handler = new ContactEventHandler({
-        config: { strategy: "direct" },
-        client: createMockClient(),
-        stateStore: store,
-        onDispatch: vi.fn(),
-      });
-
-      handler.setHubRoomInitialized(true);
-      expect(handler.isHubRoomInitialized()).toBe(true);
-      expect(store.save).toHaveBeenCalledWith(
-        expect.objectContaining({ hubRoomInitialized: true }),
-      );
-    });
-
-    it("should restore hub room state from persisted state", async () => {
-      const store = createMockStore({
-        load: vi.fn().mockResolvedValue({
-          processedEventKeys: [],
-          hubRoomId: "hub-room-restored",
-          hubRoomInitialized: true,
-          savedAt: "2026-03-08T00:00:00Z",
-        }),
-      });
-
-      const handler = new ContactEventHandler({
-        config: { strategy: "direct" },
-        client: createMockClient(),
-        stateStore: store,
-        onDispatch: vi.fn(),
-      });
-
-      await handler.loadPersistedState();
-      expect(handler.getHubRoomId()).toBe("hub-room-restored");
-      expect(handler.isHubRoomInitialized()).toBe(true);
-    });
-
-    it("should default hub room state when not persisted", async () => {
-      const store = createMockStore({
-        load: vi.fn().mockResolvedValue({
-          processedEventKeys: ["key1"],
-          savedAt: "2026-03-08T00:00:00Z",
-        }),
-      });
-
-      const handler = new ContactEventHandler({
-        config: { strategy: "direct" },
-        client: createMockClient(),
-        stateStore: store,
-        onDispatch: vi.fn(),
-      });
-
-      await handler.loadPersistedState();
-      expect(handler.getHubRoomId()).toBeNull();
-      expect(handler.isHubRoomInitialized()).toBe(false);
-    });
-  });
-
   describe("request cache persistence", () => {
     it("should restore request cache from persisted state", async () => {
       const store = createMockStore({
@@ -308,7 +232,7 @@ describe("ContactEventHandler persistence", () => {
       expect(restored).toEqual(["@alice is now a contact", "@bob was removed"]);
     });
 
-    it("should persist pending broadcasts via state store", () => {
+    it("should persist pending broadcasts via state store", async () => {
       const store = createMockStore();
       const handler = new ContactEventHandler({
         config: { strategy: "direct" },
@@ -318,8 +242,8 @@ describe("ContactEventHandler persistence", () => {
       });
 
       handler.setPendingBroadcasts(["broadcast-msg"]);
-      // Trigger a persist via hub room setter (any setter triggers persistState)
-      handler.setHubRoomId("room-1");
+      // flushState calls persistState before flush
+      await handler.flushState();
 
       expect(store.save).toHaveBeenCalledWith(
         expect.objectContaining({

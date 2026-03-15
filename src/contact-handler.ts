@@ -65,10 +65,6 @@ export class ContactEventHandler {
   // Used to enrich ContactRequestUpdatedEvent with sender info
   private readonly requestCache: Map<string, Record<string, string | undefined>> = new Map();
 
-  // Hub room state (used by hub_room strategy, INT-187)
-  private _hubRoomId: string | null = null;
-  private _hubRoomInitialized: boolean = false;
-
   // Pending broadcast messages (persisted across restarts)
   private _pendingBroadcasts: string[] = [];
 
@@ -78,28 +74,6 @@ export class ContactEventHandler {
     this.stateStore = options.stateStore;
     this.onBroadcast = options.onBroadcast;
     this.onDispatch = options.onDispatch;
-  }
-
-  // ===========================================================================
-  // Hub Room State
-  // ===========================================================================
-
-  getHubRoomId(): string | null {
-    return this._hubRoomId;
-  }
-
-  setHubRoomId(roomId: string | null): void {
-    this._hubRoomId = roomId;
-    this.persistState();
-  }
-
-  isHubRoomInitialized(): boolean {
-    return this._hubRoomInitialized;
-  }
-
-  setHubRoomInitialized(initialized: boolean): void {
-    this._hubRoomInitialized = initialized;
-    this.persistState();
   }
 
   // ===========================================================================
@@ -154,16 +128,6 @@ export class ContactEventHandler {
       console.log(`[thenvoi] Restored ${state.requestCache.length} request cache entries from persisted state`);
     }
 
-    // Restore hub room state
-    if (state.hubRoomId !== undefined) {
-      this._hubRoomId = state.hubRoomId ?? null;
-      console.log(`[thenvoi] Restored hub room ID: ${this._hubRoomId}`);
-    }
-    if (state.hubRoomInitialized) {
-      this._hubRoomInitialized = true;
-      console.log("[thenvoi] Restored hub room initialized flag");
-    }
-
     // Restore pending broadcasts
     if (state.pendingBroadcasts?.length) {
       this._pendingBroadcasts = state.pendingBroadcasts;
@@ -184,8 +148,6 @@ export class ContactEventHandler {
       requestCache: Array.from(this.requestCache.entries()).map(
         ([key, value]) => ({ key, value }),
       ),
-      hubRoomId: this._hubRoomId,
-      hubRoomInitialized: this._hubRoomInitialized,
       pendingBroadcasts: this._pendingBroadcasts,
     });
   }
@@ -560,8 +522,6 @@ export class ContactEventHandler {
       strategy: this.config.strategy ?? "disabled",
       dedupCacheSize: this.processedEvents.size,
       requestCacheSize: this.requestCache.size,
-      hubRoomId: this._hubRoomId,
-      hubRoomInitialized: this._hubRoomInitialized,
       broadcastEnabled: this.config.broadcastChanges ?? false,
       pendingBroadcastCount: this._pendingBroadcasts.length,
     };
