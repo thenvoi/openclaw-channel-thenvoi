@@ -96,6 +96,7 @@ export default function plugin(api: OpenClawPluginApi): void {
   registerChannel(api);
 
   // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const registerTool = (api as any).registerTool;
   if (registerTool) {
     const toolSchemas = getMcpToolSchemas();

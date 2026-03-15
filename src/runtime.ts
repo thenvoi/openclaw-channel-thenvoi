@@ -139,7 +139,8 @@ export class ThenvoiRuntime {
       console.log(`[thenvoi] Connecting to WebSocket: ${this.config.wsUrl} (agent=${this.config.agentId})`);
       this.socket = new Socket(this.config.wsUrl, {
         params: () => socketParams,
-        transport: RateLimitAwareWebSocket as any,
+        transport: RateLimitAwareWebSocket as unknown,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Phoenix types don't support custom transports
       } as any);
 
       this.setupSocketHandlers();
@@ -174,9 +175,8 @@ export class ThenvoiRuntime {
 
       this.socket.onError((error: unknown) => {
         // Check if underlying transport detected rate limiting
-        const conn = (this.socket as any)?.conn as
-          | RateLimitAwareWebSocket
-          | undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Phoenix types don't expose conn
+        const conn = (this.socket as any)?.conn as RateLimitAwareWebSocket | undefined;
         if (conn?.rateLimitRetryAfterMs) {
           this.rateLimitRetryAfterMs = conn.rateLimitRetryAfterMs;
           console.log(
@@ -253,9 +253,8 @@ export class ThenvoiRuntime {
       this.connected = false;
 
       // Check if rate limited before triggering reconnection
-      const conn = (this.socket as any)?.conn as
-        | RateLimitAwareWebSocket
-        | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Phoenix types don't expose conn
+      const conn = (this.socket as any)?.conn as RateLimitAwareWebSocket | undefined;
       if (conn?.rateLimitRetryAfterMs) {
         this.rateLimitRetryAfterMs = conn.rateLimitRetryAfterMs;
         console.log(
@@ -370,7 +369,8 @@ export class ThenvoiRuntime {
     };
     this.socket = new Socket(this.config.wsUrl, {
       params: () => socketParams,
-      transport: RateLimitAwareWebSocket as any,
+      transport: RateLimitAwareWebSocket as unknown,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Phoenix types don't support custom transports
     } as any);
 
     // Set up socket handlers
