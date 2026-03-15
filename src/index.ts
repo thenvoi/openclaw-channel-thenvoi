@@ -138,7 +138,6 @@ export default function plugin(api: OpenClawPluginApi): void {
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
       console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      console.log("[thenvoi] Injecting BASE_INSTRUCTIONS");
       return {
         prependContext: BASE_INSTRUCTIONS,
       };
@@ -180,13 +179,12 @@ export {
   BASE_INSTRUCTIONS,
   CORE_INSTRUCTIONS,
   CONTACT_INSTRUCTIONS,
-  HUB_ROOM_SYSTEM_PROMPT,
   buildSystemPrompt,
 } from "./prompts.js";
 
 // Contact handler exports
-export { ContactEventHandler } from "./contact-handler.js";
-export type { HubEventCallback, HubInitCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
+export { ContactEventHandler, CONTACTS_THREAD_ID } from "./contact-handler.js";
+export type { ContactEventDispatchCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
 
 // Type exports
 export type {

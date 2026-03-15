@@ -1142,19 +1142,10 @@ export class ThenvoiRuntime {
       onBroadcast: this.contactConfig.broadcastChanges
         ? (msg) => this.queueContactBroadcast(msg)
         : undefined,
-      onHubEvent: strategy === "hub_room"
-        ? (roomId, payload) => this.injectHubEvent(roomId, payload)
-        : undefined,
-      onHubInit: strategy === "hub_room"
-        ? (roomId, prompt) => this.injectHubSystemPrompt(roomId, prompt)
+      onDispatch: strategy === "direct"
+        ? (threadId, payload) => this.dispatchContactEvent(threadId, payload)
         : undefined,
     });
-
-    // For HUB_ROOM strategy, create hub room at startup
-    if (strategy === "hub_room") {
-      const hubRoomId = await this.contactEventHandler.initializeHubRoom();
-      console.log(`[thenvoi] Hub room initialized: ${hubRoomId}`);
-    }
 
     console.log(
       `[thenvoi] Contact handling enabled: strategy=${strategy}, broadcast=${this.contactConfig.broadcastChanges ?? false}`,
@@ -1163,6 +1154,8 @@ export class ThenvoiRuntime {
     // Process any pending contact requests on startup
     if (strategy === "callback" && this.contactConfig.onEvent) {
       await this.processPendingContactRequests();
+    } else if (strategy === "direct") {
+      await this.processPendingContactRequestsDirect();
     }
   }
 
@@ -1222,13 +1215,13 @@ export class ThenvoiRuntime {
   }
 
   /**
-   * Inject a message event into the hub room.
+   * Dispatch a contact event directly to the agent.
    */
-  private async injectHubEvent(roomId: string, payload: MessageCreatedPayload): Promise<void> {
+  private async dispatchContactEvent(threadId: string, payload: MessageCreatedPayload): Promise<void> {
     // Convert to OpenClaw message and deliver
     const message: OpenClawInboundMessage = {
       channelId: "thenvoi",
-      threadId: roomId,
+      threadId,
       senderId: payload.sender_id,
       senderType: payload.sender_type,
       senderName: payload.sender_name,
@@ -1244,24 +1237,48 @@ export class ThenvoiRuntime {
   }
 
   /**
-   * Inject system prompt into the hub room.
+   * Process pending contact requests via the direct strategy.
+   * Dispatches each pending request through the contact event handler.
    */
-  private async injectHubSystemPrompt(roomId: string, prompt: string): Promise<void> {
-    // Send as a system message to the hub room
-    const message: OpenClawInboundMessage = {
-      channelId: "thenvoi",
-      threadId: roomId,
-      senderId: "system",
-      senderType: "System",
-      senderName: "System",
-      text: prompt,
-      timestamp: new Date().toISOString(),
-      metadata: {
-        isSystemPrompt: true,
-      },
-    };
+  private async processPendingContactRequestsDirect(): Promise<void> {
+    try {
+      console.log("[thenvoi] Checking for pending contact requests...");
+      const response = await this.client.listContactRequests(1, 100, "pending");
 
-    this.callbacks.onMessage(message);
+      const pendingReceived = response.received || [];
+      if (pendingReceived.length === 0) {
+        console.log("[thenvoi] No pending contact requests to process");
+        return;
+      }
+
+      console.log(`[thenvoi] Found ${pendingReceived.length} pending contact requests`);
+
+      for (const request of pendingReceived) {
+        console.log(`[thenvoi] Processing pending request from ${request.from_handle} (${request.id})`);
+
+        const event: ContactEvent = {
+          type: "contact_request_received",
+          payload: {
+            id: request.id,
+            from_handle: request.from_handle,
+            from_name: request.from_name,
+            message: request.message,
+            status: request.status,
+            inserted_at: request.inserted_at ?? new Date().toISOString(),
+          },
+        };
+
+        try {
+          await this.contactEventHandler!.handle(event);
+        } catch (error) {
+          console.error(`[thenvoi] Error processing pending request ${request.id}:`, error);
+        }
+      }
+
+      console.log(`[thenvoi] Finished processing ${pendingReceived.length} pending contact requests`);
+    } catch (error) {
+      console.error("[thenvoi] Error fetching pending contact requests:", error);
+    }
   }
 
   /**

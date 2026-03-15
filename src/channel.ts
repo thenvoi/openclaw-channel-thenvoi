@@ -6,10 +6,7 @@
  */
 
 import type {
-  ContactAddedPayload,
-  ContactEvent,
   ContactEventConfig,
-  ContactRequestReceivedPayload,
   MentionRequest,
   OpenClawInboundMessage,
   ThenvoiAccountConfig,
@@ -17,6 +14,7 @@ import type {
 } from "./types.js";
 import { ThenvoiClient } from "./thenvoi-client.js";
 import { ThenvoiRuntime } from "./runtime.js";
+import { CONTACTS_THREAD_ID } from "./contact-handler.js";
 
 // =============================================================================
 // Types for OpenClaw Plugin API
@@ -535,92 +533,11 @@ export const thenvoiChannel: OpenClawChannel = {
       clients.set(accountId, client);
       console.log(`[thenvoi:${accountId}] Client registered`);
 
-      // Auto-approve callback for contact requests and auto-start conversations
-      const autoApproveContacts = async (event: ContactEvent): Promise<void> => {
-        if (event.type === "contact_request_received") {
-          const payload = event.payload as ContactRequestReceivedPayload;
-          console.log(
-            `[thenvoi:${accountId}] Auto-approving contact request from ${payload.from_handle}`,
-          );
-          try {
-            await client.respondContactRequest("approve", undefined, payload.id);
-            console.log(
-              `[thenvoi:${accountId}] Contact request ${payload.id} approved`,
-            );
-          } catch (error) {
-            console.error(
-              `[thenvoi:${accountId}] Failed to approve contact request:`,
-              error,
-            );
-          }
-        } else if (event.type === "contact_added") {
-          // When a new contact is added, automatically start a conversation
-          const payload = event.payload as ContactAddedPayload;
-          console.log(
-            `[thenvoi:${accountId}] New contact added: ${payload.name} (${payload.id} - ${payload.handle}). Starting conversation...`,
-          );
-          try {
-            // Create a new chat room
-            const chatRoom = await client.createChat();
-            console.log(
-              `[thenvoi:${accountId}] Created chat room ${chatRoom.id} for new contact ${payload.name} (${payload.id} - ${payload.handle})`,
-            );
-
-            // Add the new contact as a participant
-            // Wait for contact to propagate, then lookup peer by name (like MCP tool)
-            console.log(`[thenvoi:${accountId}] Waiting 1s for contact to propagate...`);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-
-            console.log(`[thenvoi:${accountId}] Looking up peers...`);
-            const peersResponse = await client.lookupPeers(1, 100);
-            console.log(`[thenvoi:${accountId}] Found ${peersResponse.peers.length} peers:`,
-              peersResponse.peers.map(p => ({ id: p.id, name: p.name, handle: p.handle })));
-
-            const normalizedName = payload.name.replace(/^@/, "").toLowerCase();
-            const peer = peersResponse.peers.find(
-              (p) =>
-                p.name.toLowerCase() === normalizedName ||
-                p.handle?.toLowerCase() === normalizedName
-            );
-            console.log(`[thenvoi:${accountId}] Looking for peer with name/handle "${payload.name}", found:`, peer);
-
-            if (!peer) {
-              throw new Error(`Peer not found for contact: ${payload.name}. Available peers: ${peersResponse.peers.map(p => p.name).join(', ')}`);
-            }
-
-            console.log(`[thenvoi:${accountId}] Adding participant with peer.id: ${peer.id}`);
-            await client.addParticipant(chatRoom.id, peer.id, "member");
-            console.log(
-              `[thenvoi:${accountId}] Added ${payload.name} to chat room ${chatRoom.id}`,
-            );
-
-            // Get agent info for context
-            const agent = await client.getAgentMe();
-
-            // Send a welcome message to the new contact
-            const welcomeMessage =
-              `Hi ${payload.name}! I'm ${agent.name}. ` +
-              `I noticed we just connected. How can I help you today?`;
-
-            await client.sendMessage(chatRoom.id, welcomeMessage, [
-              { id: peer.id, name: payload.name },
-            ]);
-            console.log(
-              `[thenvoi:${accountId}] Sent welcome message to ${payload.name} in room ${chatRoom.id}`,
-            );
-          } catch (error) {
-            console.error(
-              `[thenvoi:${accountId}] Failed to start conversation with new contact:`,
-              error,
-            );
-          }
-        }
-      };
-
-      // Contact event handling config with auto-approve
+      // Contact event handling — dispatch to LLM for evaluation.
+      // The LLM uses thenvoi_respond_contact_request to approve/reject.
+      // Operators can customize approval criteria in their agent's system prompt.
       const contactConfig: ContactEventConfig = {
-        strategy: "callback",
-        onEvent: autoApproveContacts,
+        strategy: "direct",
         broadcastChanges: true,
       };
 
@@ -660,20 +577,22 @@ export const thenvoiChannel: OpenClawChannel = {
                 };
 
                 // Create a dispatcher that sends replies via Thenvoi
+                // Contact events use a virtual thread — don't try to send to Thenvoi
+                const isContactThread = message.threadId === CONTACTS_THREAD_ID;
                 const dispatcher = {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   sendToolResult: (payload: any): boolean => {
-                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    if (!isContactThread) void sendReplyToThenvoi(client, message.threadId, payload);
                     return true;
                   },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   sendBlockReply: (payload: any): boolean => {
-                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    if (!isContactThread) void sendReplyToThenvoi(client, message.threadId, payload);
                     return true;
                   },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   sendFinalReply: (payload: any): boolean => {
-                    void sendReplyToThenvoi(client, message.threadId, payload);
+                    if (!isContactThread) void sendReplyToThenvoi(client, message.threadId, payload);
                     return true;
                   },
                   waitForIdle: async (): Promise<void> => Promise.resolve(),
