@@ -423,6 +423,42 @@ describe("ThenvoiRuntime", () => {
     });
   });
 
+  describe("contact state persistence on disconnect", () => {
+    it("should flush contact state when disconnecting", async () => {
+      // Set up fetch to return empty chats list and no pending messages
+      const urlConfigs = new Map<string, { response?: unknown }>();
+      urlConfigs.set(`${mockThenvoiConfig.restUrl}/api/v1/agent/chats`, {
+        response: { chats: [] },
+      });
+      urlConfigs.set(`${mockThenvoiConfig.restUrl}/api/v1/agent/contacts/requests`, {
+        response: { received: [], sent: [], metadata: { page: 1, page_size: 100, received: { total: 0, total_pages: 0 }, sent: { total: 0, total_pages: 0 } } },
+      });
+      globalThis.fetch = createMockFetchByUrl(urlConfigs, {
+        response: { message: "no_pending_messages" },
+      });
+
+      // Create runtime with contact handling enabled (direct strategy)
+      const contactRuntime = new ThenvoiRuntime(
+        mockThenvoiConfig,
+        callbacks,
+        mockClient,
+        { strategy: "direct", broadcastChanges: false },
+      );
+
+      await contactRuntime.connect();
+
+      // Access the internal contact handler to spy on flushState
+      const handler = (contactRuntime as unknown as { contactEventHandler: { flushState: () => Promise<void> } }).contactEventHandler;
+      expect(handler).toBeDefined();
+
+      const flushSpy = vi.spyOn(handler, "flushState").mockResolvedValue(undefined);
+
+      await contactRuntime.disconnect();
+
+      expect(flushSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("message queuing during sync", () => {
     it("should queue WS messages that arrive during sync and process after", async () => {
       // This test verifies the Python SDK-aligned behavior:

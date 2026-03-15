@@ -165,5 +165,21 @@ describe("ContactStateStore", () => {
       await store.flush();
       expect(writeFile).not.toHaveBeenCalled();
     });
+
+    it("should propagate write errors to caller", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      vi.mocked(writeFile).mockRejectedValue(new Error("disk full"));
+
+      const state: ContactPersistedState = {
+        processedEventKeys: ["key1"],
+        savedAt: "2026-03-08T00:00:00Z",
+      };
+
+      store.save(state);
+      await expect(store.flush()).rejects.toThrow("disk full");
+
+      consoleSpy.mockRestore();
+    });
   });
 });

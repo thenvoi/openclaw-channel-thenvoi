@@ -93,20 +93,22 @@ export class ContactStateStore {
 
   /**
    * Flush any pending writes immediately.
-   * Call this on shutdown to avoid losing state.
+   * Unlike debounced saves, this propagates write errors to the caller.
    */
   async flush(): Promise<void> {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
-    await this.writeToDisk();
+    await this.writeToDisk(true);
   }
 
   /**
    * Write the pending state to disk.
+   * @param propagateErrors - When true (flush path), re-throw after logging.
+   *   When false (debounced path), swallow errors since there's no caller to handle them.
    */
-  private async writeToDisk(): Promise<void> {
+  private async writeToDisk(propagateErrors = false): Promise<void> {
     if (!this.pendingState) {
       return;
     }
@@ -121,6 +123,9 @@ export class ContactStateStore {
       console.log(`[thenvoi:state] State saved (dedupKeys=${state.processedEventKeys.length})`);
     } catch (error) {
       console.error("[thenvoi:state] Failed to save state:", error);
+      if (propagateErrors) {
+        throw error;
+      }
     }
   }
 }
