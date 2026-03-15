@@ -9,6 +9,12 @@ plugins/
 
 # Runtime directories (contain user data)
 openclaw-config/
+openclaw-config-*/agents/
+openclaw-config-*/canvas/
+openclaw-config-*/cron/
+openclaw-config-*/workspace/
+openclaw-config-*/state/
+openclaw-config-*/update-check.json
 
 # Keep config template
 !openclaw-config/openclaw.json

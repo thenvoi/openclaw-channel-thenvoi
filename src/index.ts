@@ -108,11 +108,11 @@ export default function plugin(api: OpenClawPluginApi): void {
         // OpenClaw execute signature: (toolCallId: string, input: object) => AgentToolResult
         // Result format: { content: [{ type: "text", text: "..." }], details: payload }
         execute: async (_toolCallId: unknown, input: unknown) => {
-          console.log(`[thenvoi] Executing tool ${tool.name} with input:`, JSON.stringify(input));
+          console.log(`[thenvoi] Executing tool ${tool.name}`);
           try {
             const result = await executeMcpTool(tool.name, input ?? {});
             const resultStr = JSON.stringify(result, null, 2);
-            console.log(`[thenvoi] Tool ${tool.name} returned:`, resultStr);
+            console.log(`[thenvoi] Tool ${tool.name} completed`);
 
             // Return in OpenClaw's expected AgentToolResult format
             return {

@@ -53,6 +53,9 @@ export interface RuntimeCallbacks {
   onContactRemoved?: (payload: ContactRemovedPayload) => void;
 }
 
+/** Maximum number of processed message IDs to track (prevents unbounded memory growth). */
+const MAX_PROCESSED_MESSAGE_IDS = 10000;
+
 export class ThenvoiRuntime {
   private readonly config: ThenvoiConfig;
   private readonly callbacks: RuntimeCallbacks;
@@ -133,8 +136,7 @@ export class ThenvoiRuntime {
         api_key: this.config.apiKey,
         agent_id: this.config.agentId,
       };
-      console.log(`[thenvoi] Connecting to WebSocket: ${this.config.wsUrl}`);
-      console.log(`[thenvoi] Socket params:`, JSON.stringify(socketParams));
+      console.log(`[thenvoi] Connecting to WebSocket: ${this.config.wsUrl} (agent=${this.config.agentId})`);
       this.socket = new Socket(this.config.wsUrl, {
         params: () => socketParams,
         transport: RateLimitAwareWebSocket as any,
@@ -629,7 +631,7 @@ export class ThenvoiRuntime {
 
       // Mark as processed
       await this.client.markMessageProcessed(roomId, payload.id);
-      this.processedMessageIds.add(payload.id);
+      this.trackProcessedMessage(payload.id);
 
       console.log(`[thenvoi] Message ${payload.id} delivered and marked as processed`);
     } catch (error) {
@@ -687,7 +689,7 @@ export class ThenvoiRuntime {
 
       // Mark as processed
       await this.client.markMessageProcessed(roomId, messageId);
-      this.processedMessageIds.add(messageId);
+      this.trackProcessedMessage(messageId);
     } catch (error) {
       // Mark as failed
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -736,6 +738,18 @@ export class ThenvoiRuntime {
    */
   getProcessedMessageCount(): number {
     return this.processedMessageIds.size;
+  }
+
+  /**
+   * Track a processed message ID with bounded eviction.
+   */
+  private trackProcessedMessage(messageId: string): void {
+    this.processedMessageIds.add(messageId);
+    if (this.processedMessageIds.size > MAX_PROCESSED_MESSAGE_IDS) {
+      // Evict oldest entry (Set preserves insertion order)
+      const first = this.processedMessageIds.values().next().value;
+      if (first) this.processedMessageIds.delete(first);
+    }
   }
 
   /**
@@ -1034,9 +1048,6 @@ export class ThenvoiRuntime {
     roomId: string,
     payload: MessageCreatedPayload,
   ): Promise<void> {
-    // Debug: log raw payload to understand structure
-    console.log("[thenvoi] Raw message payload:", JSON.stringify(payload, null, 2));
-
     // Record sync point on first WebSocket message
     if (this.syncPointMessageId === null) {
       this.syncPointMessageId = payload.id;
