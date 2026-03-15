@@ -55,7 +55,7 @@ export interface RuntimeCallbacks {
 }
 
 /** Maximum number of processed message IDs to track (prevents unbounded memory growth). */
-const MAX_PROCESSED_MESSAGE_IDS = 10000;
+export const MAX_PROCESSED_MESSAGE_IDS = 10000;
 
 export class ThenvoiRuntime {
   private readonly config: ThenvoiConfig;
