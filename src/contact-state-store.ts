@@ -5,7 +5,7 @@
  * Uses a JSON file stored at a configurable path.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /** Shape of the persisted state file. */
@@ -53,6 +53,11 @@ export class ContactStateStore {
       ) {
         console.warn("[thenvoi:state] Invalid state file format, ignoring");
         return null;
+      }
+
+      // Ensure savedAt is a valid string (may be missing in older state files)
+      if (typeof parsed.savedAt !== "string") {
+        parsed.savedAt = "unknown";
       }
 
       console.log(
@@ -127,7 +132,10 @@ export class ContactStateStore {
       try {
         // Ensure directory exists
         await mkdir(dirname(this.filePath), { recursive: true });
-        await writeFile(this.filePath, JSON.stringify(state, null, 2), "utf-8");
+        // Atomic write: write to temp file, then rename to avoid corruption on crash
+        const tmpPath = this.filePath + ".tmp";
+        await writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+        await rename(tmpPath, this.filePath);
         console.log(`[thenvoi:state] State saved (dedupKeys=${state.processedEventKeys.length})`);
       } catch (error) {
         console.error("[thenvoi:state] Failed to save state:", error);

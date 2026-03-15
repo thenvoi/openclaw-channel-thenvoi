@@ -20,6 +20,12 @@ export interface ThenvoiAccountConfig {
   wsUrl?: string;
   restUrl?: string;
   /**
+   * Directory for persisted state files (e.g. dedup cache).
+   * Defaults to ~/.openclaw/plugins/thenvoi/{agentId}/.
+   * Override in Docker or when home directory is not writable.
+   */
+  stateDir?: string;
+  /**
    * Configuration for contact event handling.
    * Only applicable when contactConfig.strategy is not "disabled".
    */

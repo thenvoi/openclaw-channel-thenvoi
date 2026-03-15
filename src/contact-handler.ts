@@ -40,7 +40,7 @@ export type BroadcastCallback = (message: string) => void;
 export interface ContactEventHandlerOptions {
   config: ContactEventConfig;
   client: ThenvoiClient;
-  stateStore?: ContactStateStore;
+  stateStore?: ContactStateStore | null;
   onBroadcast?: BroadcastCallback;
   onDispatch?: ContactEventDispatchCallback;
 }
@@ -54,7 +54,7 @@ export interface ContactEventHandlerOptions {
 export class ContactEventHandler {
   private readonly config: ContactEventConfig;
   private readonly client: ThenvoiClient;
-  private readonly stateStore?: ContactStateStore;
+  private readonly stateStore?: ContactStateStore | null;
   private readonly onBroadcast?: BroadcastCallback;
   private readonly onDispatch?: ContactEventDispatchCallback;
 

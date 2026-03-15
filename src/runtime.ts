@@ -1148,7 +1148,7 @@ export class ThenvoiRuntime {
     this.contactEventHandler = new ContactEventHandler({
       config: this.contactConfig,
       client: this.client,
-      stateStore: this.contactStateStore ?? undefined,
+      stateStore: this.contactStateStore,
       onBroadcast: this.contactConfig.broadcastChanges
         ? (msg) => this.queueContactBroadcast(msg)
         : undefined,

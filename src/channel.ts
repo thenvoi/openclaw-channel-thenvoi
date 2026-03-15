@@ -544,15 +544,17 @@ export const thenvoiChannel: OpenClawChannel = {
         broadcastChanges: true,
       };
 
-      // Derive state file path for contact persistence
-      const statePath = join(
+      // Derive state file path for contact persistence.
+      // Sanitize agentId to prevent path traversal.
+      const safeAgentId = config.agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const stateDir = accountConfig.stateDir ?? join(
         homedir(),
         ".openclaw",
         "plugins",
         "thenvoi",
-        config.agentId,
-        "contact-state.json",
+        safeAgentId,
       );
+      const statePath = join(stateDir, "contact-state.json");
 
       // Create and start runtime with client
       const runtime = new ThenvoiRuntime(

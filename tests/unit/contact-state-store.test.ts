@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { ContactStateStore } from "../../src/contact-state-store.js";
 import type { ContactPersistedState } from "../../src/contact-state-store.js";
 
@@ -12,6 +12,7 @@ vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
   writeFile: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
+  rename: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("ContactStateStore", () => {
@@ -73,6 +74,16 @@ describe("ContactStateStore", () => {
       const result = await store.load();
       expect(result).toBeNull();
     });
+
+    it("should default savedAt to 'unknown' when missing", async () => {
+      vi.mocked(readFile).mockResolvedValue(JSON.stringify({
+        processedEventKeys: ["key1"],
+      }));
+
+      const result = await store.load();
+      expect(result).not.toBeNull();
+      expect(result!.savedAt).toBe("unknown");
+    });
   });
 
   describe("save", () => {
@@ -82,6 +93,16 @@ describe("ContactStateStore", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(writeFile).toHaveBeenCalledTimes(1);
+      // Should write to temp file, then rename atomically
+      expect(writeFile).toHaveBeenCalledWith(
+        "/tmp/test-state.json.tmp",
+        expect.any(String),
+        "utf-8",
+      );
+      expect(rename).toHaveBeenCalledWith(
+        "/tmp/test-state.json.tmp",
+        "/tmp/test-state.json",
+      );
     });
 
     it("should trim dedup keys to max 200", async () => {
@@ -107,6 +128,21 @@ describe("ContactStateStore", () => {
       expect(written.savedAt).toBeDefined();
       // Should be a valid ISO timestamp
       expect(new Date(written.savedAt).toISOString()).toBe(written.savedAt);
+    });
+
+    it("should use atomic write (temp file + rename)", async () => {
+      store.save({ processedEventKeys: ["key1"] });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(writeFile).toHaveBeenCalledWith(
+        "/tmp/test-state.json.tmp",
+        expect.any(String),
+        "utf-8",
+      );
+      expect(rename).toHaveBeenCalledWith(
+        "/tmp/test-state.json.tmp",
+        "/tmp/test-state.json",
+      );
     });
 
     it("should create directory if needed", async () => {
@@ -145,10 +181,10 @@ describe("ContactStateStore", () => {
       // Use 0ms debounce so the debounced write starts immediately
       const raceStore = new ContactStateStore("/tmp/test-state.json", 0);
 
-      // Make writeFile slow to simulate an in-flight write
-      let resolveWrite!: () => void;
-      const writePromise = new Promise<void>((resolve) => { resolveWrite = resolve; });
-      vi.mocked(writeFile).mockReturnValue(writePromise as Promise<void>);
+      // Make rename slow to simulate an in-flight write
+      let resolveRename!: () => void;
+      const renamePromise = new Promise<void>((resolve) => { resolveRename = resolve; });
+      vi.mocked(rename).mockReturnValue(renamePromise as Promise<void>);
 
       // Trigger a debounced save
       raceStore.save({ processedEventKeys: ["key1"] });
@@ -165,8 +201,8 @@ describe("ContactStateStore", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(flushResolved).toBe(false);
 
-      // Resolve the in-flight write
-      resolveWrite();
+      // Resolve the in-flight rename (completing the atomic write)
+      resolveRename();
       await flushPromise;
 
       // Write was called once (the debounced one); flush had no pending state
