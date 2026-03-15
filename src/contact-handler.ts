@@ -106,7 +106,6 @@ export class ContactEventHandler {
 
     this.stateStore.save({
       processedEventKeys: Array.from(this.processedEvents.keys()),
-      savedAt: new Date().toISOString(),
     });
   }
 

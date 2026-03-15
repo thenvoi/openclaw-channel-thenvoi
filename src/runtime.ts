@@ -94,7 +94,7 @@ export class ThenvoiRuntime {
   // Contact event handling
   private contactEventHandler: ContactEventHandler | null = null;
   private readonly contactConfig: ContactEventConfig;
-  private readonly contactStateStore: ContactStateStore | null = null;
+  private readonly contactStateStore: ContactStateStore | null;
   private pendingContactBroadcasts: string[] = [];
 
   /**
@@ -115,9 +115,7 @@ export class ThenvoiRuntime {
     this.callbacks = callbacks;
     this.client = client ?? new ThenvoiClient(config);
     this.contactConfig = contactConfig ?? { strategy: "disabled" };
-    if (statePath) {
-      this.contactStateStore = new ContactStateStore(statePath);
-    }
+    this.contactStateStore = statePath ? new ContactStateStore(statePath) : null;
   }
 
   // ===========================================================================

@@ -27,6 +27,8 @@ export class ContactStateStore {
   private readonly debounceMs: number;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingState: ContactPersistedState | null = null;
+  /** Tracks the in-flight write so flush() can await it. */
+  private inflightWrite: Promise<void> = Promise.resolve();
 
   constructor(filePath: string, debounceMs: number = DEFAULT_DEBOUNCE_MS) {
     this.filePath = filePath;
@@ -43,6 +45,7 @@ export class ContactStateStore {
       const parsed = JSON.parse(data) as ContactPersistedState;
 
       // Validate required fields
+      // Note: `typeof null === "object"` in JS, so the explicit null check is necessary
       if (
         typeof parsed !== "object" ||
         parsed === null ||
@@ -70,11 +73,11 @@ export class ContactStateStore {
   /**
    * Save state to disk (debounced).
    * Multiple rapid calls will be coalesced into a single write.
+   * The store generates the `savedAt` timestamp automatically.
    */
-  save(state: ContactPersistedState): void {
+  save(state: Omit<ContactPersistedState, "savedAt">): void {
     // Trim dedup keys to bounded size (keep most recent)
     const trimmedState: ContactPersistedState = {
-      ...state,
       processedEventKeys: state.processedEventKeys.slice(-MAX_PERSISTED_DEDUP_KEYS),
       savedAt: new Date().toISOString(),
     };
@@ -100,6 +103,10 @@ export class ContactStateStore {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+    // Wait for any in-flight debounced write to complete before flushing
+    // remaining state. Without this, flush() could return before a concurrent
+    // writeToDisk() finishes, losing the final state on shutdown.
+    await this.inflightWrite;
     await this.writeToDisk(true);
   }
 
@@ -116,16 +123,21 @@ export class ContactStateStore {
     const state = this.pendingState;
     this.pendingState = null;
 
-    try {
-      // Ensure directory exists
-      await mkdir(dirname(this.filePath), { recursive: true });
-      await writeFile(this.filePath, JSON.stringify(state, null, 2), "utf-8");
-      console.log(`[thenvoi:state] State saved (dedupKeys=${state.processedEventKeys.length})`);
-    } catch (error) {
-      console.error("[thenvoi:state] Failed to save state:", error);
-      if (propagateErrors) {
-        throw error;
+    const write = (async () => {
+      try {
+        // Ensure directory exists
+        await mkdir(dirname(this.filePath), { recursive: true });
+        await writeFile(this.filePath, JSON.stringify(state, null, 2), "utf-8");
+        console.log(`[thenvoi:state] State saved (dedupKeys=${state.processedEventKeys.length})`);
+      } catch (error) {
+        console.error("[thenvoi:state] Failed to save state:", error);
+        if (propagateErrors) {
+          throw error;
+        }
       }
-    }
+    })();
+
+    this.inflightWrite = write;
+    await write;
   }
 }

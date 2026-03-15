@@ -19,6 +19,9 @@ describe("ContactStateStore", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     // Use 0ms debounce for tests
     store = new ContactStateStore("/tmp/test-state.json", 0);
   });
@@ -32,12 +35,9 @@ describe("ContactStateStore", () => {
       const err = new Error("ENOENT") as NodeJS.ErrnoException;
       err.code = "ENOENT";
       vi.mocked(readFile).mockRejectedValue(err);
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       const result = await store.load();
       expect(result).toBeNull();
-
-      consoleSpy.mockRestore();
     });
 
     it("should return parsed state from file", async () => {
@@ -46,74 +46,47 @@ describe("ContactStateStore", () => {
         savedAt: "2026-03-08T00:00:00.000Z",
       };
       vi.mocked(readFile).mockResolvedValue(JSON.stringify(state));
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       const result = await store.load();
       expect(result).toEqual(state);
-
-      consoleSpy.mockRestore();
     });
 
     it("should return null when processedEventKeys is missing or not an array", async () => {
       vi.mocked(readFile).mockResolvedValue(JSON.stringify({
         savedAt: "2026-03-08T00:00:00Z",
       }));
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const result = await store.load();
       expect(result).toBeNull();
-
-      consoleSpy.mockRestore();
     });
 
     it("should return null on parse error", async () => {
       vi.mocked(readFile).mockResolvedValue("not-json");
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const result = await store.load();
       expect(result).toBeNull();
-
-      consoleSpy.mockRestore();
     });
 
     it("should return null for non-object parsed values", async () => {
       vi.mocked(readFile).mockResolvedValue('"just a string"');
-      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const result = await store.load();
       expect(result).toBeNull();
-
-      consoleSpy.mockRestore();
     });
   });
 
   describe("save", () => {
     it("should debounce writes", async () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-      const state: ContactPersistedState = {
-        processedEventKeys: ["key1"],
-        savedAt: "2026-03-08T00:00:00Z",
-      };
-
-      store.save(state);
+      store.save({ processedEventKeys: ["key1"] });
       // Wait for debounce
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(writeFile).toHaveBeenCalledTimes(1);
-      consoleSpy.mockRestore();
     });
 
     it("should trim dedup keys to max 200", async () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
       const keys = Array.from({ length: 300 }, (_, i) => `key-${i}`);
-      const state: ContactPersistedState = {
-        processedEventKeys: keys,
-        savedAt: "2026-03-08T00:00:00Z",
-      };
-
-      store.save(state);
+      store.save({ processedEventKeys: keys });
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const written = JSON.parse(
@@ -122,43 +95,38 @@ describe("ContactStateStore", () => {
       expect(written.processedEventKeys).toHaveLength(200);
       // Should keep the most recent (last 200)
       expect(written.processedEventKeys[0]).toBe("key-100");
+    });
 
-      consoleSpy.mockRestore();
+    it("should generate savedAt timestamp automatically", async () => {
+      store.save({ processedEventKeys: ["key1"] });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const written = JSON.parse(
+        vi.mocked(writeFile).mock.calls[0][1] as string,
+      ) as ContactPersistedState;
+      expect(written.savedAt).toBeDefined();
+      // Should be a valid ISO timestamp
+      expect(new Date(written.savedAt).toISOString()).toBe(written.savedAt);
     });
 
     it("should create directory if needed", async () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-      const state: ContactPersistedState = {
-        processedEventKeys: [],
-        savedAt: "2026-03-08T00:00:00Z",
-      };
-
-      store.save(state);
+      store.save({ processedEventKeys: [] });
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mkdir).toHaveBeenCalledWith("/tmp", { recursive: true });
-      consoleSpy.mockRestore();
     });
   });
 
   describe("flush", () => {
     it("should write immediately without waiting for debounce", async () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
       // Use a store with long debounce
       const slowStore = new ContactStateStore("/tmp/test-state.json", 60000);
-      const state: ContactPersistedState = {
-        processedEventKeys: ["key1"],
-        savedAt: "2026-03-08T00:00:00Z",
-      };
 
-      slowStore.save(state);
+      slowStore.save({ processedEventKeys: ["key1"] });
       // Flush immediately - should not wait for 60s debounce
       await slowStore.flush();
 
       expect(writeFile).toHaveBeenCalledTimes(1);
-      consoleSpy.mockRestore();
     });
 
     it("should be safe to call with no pending state", async () => {
@@ -167,19 +135,42 @@ describe("ContactStateStore", () => {
     });
 
     it("should propagate write errors to caller", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
       vi.mocked(writeFile).mockRejectedValue(new Error("disk full"));
 
-      const state: ContactPersistedState = {
-        processedEventKeys: ["key1"],
-        savedAt: "2026-03-08T00:00:00Z",
-      };
-
-      store.save(state);
+      store.save({ processedEventKeys: ["key1"] });
       await expect(store.flush()).rejects.toThrow("disk full");
+    });
 
-      consoleSpy.mockRestore();
+    it("should await in-flight debounced write before flushing", async () => {
+      // Use 0ms debounce so the debounced write starts immediately
+      const raceStore = new ContactStateStore("/tmp/test-state.json", 0);
+
+      // Make writeFile slow to simulate an in-flight write
+      let resolveWrite!: () => void;
+      const writePromise = new Promise<void>((resolve) => { resolveWrite = resolve; });
+      vi.mocked(writeFile).mockReturnValue(writePromise as Promise<void>);
+
+      // Trigger a debounced save
+      raceStore.save({ processedEventKeys: ["key1"] });
+
+      // Wait for the debounce timer to fire (0ms), starting the write
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Now flush while the write is in flight — flush should wait for it
+      const flushPromise = raceStore.flush();
+
+      // Flush should not resolve yet (in-flight write is pending)
+      let flushResolved = false;
+      void flushPromise.then(() => { flushResolved = true; });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(flushResolved).toBe(false);
+
+      // Resolve the in-flight write
+      resolveWrite();
+      await flushPromise;
+
+      // Write was called once (the debounced one); flush had no pending state
+      expect(writeFile).toHaveBeenCalledTimes(1);
     });
   });
 });
