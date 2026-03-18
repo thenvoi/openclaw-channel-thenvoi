@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ThenvoiRuntime, type RuntimeCallbacks } from "../../src/runtime.js";
+import { ThenvoiRuntime, type RuntimeCallbacks, MAX_PROCESSED_MESSAGE_IDS } from "../../src/runtime.js";
 import { ThenvoiClient } from "../../src/thenvoi-client.js";
 import { mockThenvoiConfig } from "../fixtures/configs.js";
 import { createMockFetch, createMockFetchByUrl } from "../__mocks__/fetch.js";
@@ -462,6 +462,40 @@ describe("ThenvoiRuntime", () => {
       const setBroadcastsOrder = setBroadcastsSpy.mock.invocationCallOrder[0];
       const flushOrder = flushSpy.mock.invocationCallOrder[0];
       expect(setBroadcastsOrder).toBeLessThan(flushOrder);
+    });
+  });
+
+  describe("processedMessageIds eviction", () => {
+    it("should not evict when exactly at MAX_PROCESSED_MESSAGE_IDS", () => {
+      const evictionRuntime = new ThenvoiRuntime(mockThenvoiConfig, callbacks, mockClient);
+
+      for (let i = 0; i < MAX_PROCESSED_MESSAGE_IDS; i++) {
+        (evictionRuntime as any).trackProcessedMessage(`msg-${i}`);
+      }
+      expect(evictionRuntime.getProcessedMessageCount()).toBe(MAX_PROCESSED_MESSAGE_IDS);
+
+      // All entries should still be present at exactly the limit
+      expect((evictionRuntime as any).processedMessageIds.has("msg-0")).toBe(true);
+      expect((evictionRuntime as any).processedMessageIds.has(`msg-${MAX_PROCESSED_MESSAGE_IDS - 1}`)).toBe(true);
+    });
+
+    it("should evict oldest entry when exceeding MAX_PROCESSED_MESSAGE_IDS", () => {
+      const evictionRuntime = new ThenvoiRuntime(mockThenvoiConfig, callbacks, mockClient);
+
+      // Fill to the limit
+      for (let i = 0; i < MAX_PROCESSED_MESSAGE_IDS; i++) {
+        (evictionRuntime as any).trackProcessedMessage(`msg-${i}`);
+      }
+      expect(evictionRuntime.getProcessedMessageCount()).toBe(MAX_PROCESSED_MESSAGE_IDS);
+
+      // Add one more — should evict the oldest (msg-0)
+      (evictionRuntime as any).trackProcessedMessage("msg-new");
+      expect(evictionRuntime.getProcessedMessageCount()).toBe(MAX_PROCESSED_MESSAGE_IDS);
+
+      // Oldest should be gone, newest should be present
+      expect((evictionRuntime as any).processedMessageIds.has("msg-0")).toBe(false);
+      expect((evictionRuntime as any).processedMessageIds.has("msg-1")).toBe(true);
+      expect((evictionRuntime as any).processedMessageIds.has("msg-new")).toBe(true);
     });
   });
 
