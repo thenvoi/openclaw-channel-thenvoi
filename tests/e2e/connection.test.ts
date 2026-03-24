@@ -2,22 +2,24 @@
  * E2E Tests: WebSocket Connection
  *
  * Tests the connection flow against a real Thenvoi environment.
+ * Uses ThenvoiLink from @thenvoi/sdk and RoomPresence from @thenvoi/sdk/runtime.
  */
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { ThenvoiRuntime, type RuntimeCallbacks } from "../../src/runtime.js";
-import { ThenvoiClient } from "../../src/thenvoi-client.js";
+import { ThenvoiLink } from "@thenvoi/sdk";
+import { RoomPresence } from "@thenvoi/sdk/runtime";
 import {
   getE2EConfig,
   canRunE2E,
   E2E_SKIP_MESSAGE,
   waitFor,
 } from "./setup.js";
-import type { ThenvoiConfig } from "../../src/types.js";
+import type { E2EConfig } from "./setup.js";
 
 describe("E2E: Connection", () => {
-  let config: ThenvoiConfig;
-  let runtime: ThenvoiRuntime | null = null;
+  let config: E2EConfig;
+  let link: ThenvoiLink | null = null;
+  let presence: RoomPresence | null = null;
 
   beforeAll(() => {
     if (!canRunE2E()) {
@@ -27,9 +29,13 @@ describe("E2E: Connection", () => {
   });
 
   afterEach(async () => {
-    if (runtime) {
-      await runtime.disconnect();
-      runtime = null;
+    if (presence) {
+      await presence.stop();
+      presence = null;
+    }
+    if (link) {
+      await link.disconnect();
+      link = null;
     }
   });
 
@@ -37,8 +43,13 @@ describe("E2E: Connection", () => {
     it.skipIf(!canRunE2E())(
       "should authenticate and get agent metadata",
       async () => {
-        const client = new ThenvoiClient(config);
-        const agent = await client.getAgentMe();
+        link = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: config.apiKey,
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
+        const agent = await link.rest.getAgentMe();
 
         expect(agent).toBeDefined();
         expect(agent.id).toBe(config.agentId);
@@ -49,10 +60,14 @@ describe("E2E: Connection", () => {
     it.skipIf(!canRunE2E())(
       "should reject invalid API key",
       async () => {
-        const invalidConfig = { ...config, apiKey: "invalid-key" };
-        const client = new ThenvoiClient(invalidConfig);
+        const invalidLink = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: "invalid-key",
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
 
-        await expect(client.getAgentMe()).rejects.toThrow(/401|Invalid|Auth/i);
+        await expect(invalidLink.rest.getAgentMe()).rejects.toThrow(/401|Invalid|Auth/i);
       },
     );
   });
@@ -61,71 +76,81 @@ describe("E2E: Connection", () => {
     it.skipIf(!canRunE2E())(
       "should connect to WebSocket successfully",
       async () => {
-        const callbacks: RuntimeCallbacks = {
-          onMessage: () => {},
-        };
+        link = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: config.apiKey,
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
 
-        runtime = new ThenvoiRuntime(config, callbacks);
+        await link.connect();
 
-        await runtime.connect();
-
-        expect(runtime.isConnected()).toBe(true);
+        expect(link.isConnected()).toBe(true);
       },
     );
 
     it.skipIf(!canRunE2E())(
       "should join agent channel on connect",
       async () => {
-        let syncCompleted = false;
+        let roomJoined = false;
 
-        const callbacks: RuntimeCallbacks = {
-          onMessage: () => {},
-          onSyncCompleted: () => {
-            syncCompleted = true;
-          },
+        link = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: config.apiKey,
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
+        await link.connect();
+
+        presence = new RoomPresence({
+          link,
+          autoSubscribeExistingRooms: true,
+        });
+
+        presence.onRoomJoined = async () => {
+          roomJoined = true;
         };
 
-        runtime = new ThenvoiRuntime(config, callbacks);
-        await runtime.connect();
+        await presence.start();
 
-        // Sync should complete after connection
-        await waitFor(() => syncCompleted || !runtime?.isSyncing(), 5000);
+        // Wait for presence to subscribe to existing rooms
+        await waitFor(() => roomJoined || presence!.rooms.size > 0, 5000);
 
-        expect(runtime.isConnected()).toBe(true);
+        expect(link.isConnected()).toBe(true);
       },
     );
 
     it.skipIf(!canRunE2E())(
       "should disconnect cleanly",
       async () => {
-        const callbacks: RuntimeCallbacks = {
-          onMessage: () => {},
-        };
+        link = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: config.apiKey,
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
+        await link.connect();
+        expect(link.isConnected()).toBe(true);
 
-        runtime = new ThenvoiRuntime(config, callbacks);
-        await runtime.connect();
-        expect(runtime.isConnected()).toBe(true);
-
-        await runtime.disconnect();
-        expect(runtime.isConnected()).toBe(false);
+        await link.disconnect();
+        expect(link.isConnected()).toBe(false);
 
         // Prevent afterEach from trying to disconnect again
-        runtime = null;
+        link = null;
       },
     );
 
     it.skipIf(!canRunE2E())(
       "should reject connection with invalid credentials",
       async () => {
-        const invalidConfig = { ...config, apiKey: "invalid-key" };
-        const callbacks: RuntimeCallbacks = {
-          onMessage: () => {},
-          onError: () => {},
-        };
+        const invalidLink = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: "invalid-key",
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
 
-        const invalidRuntime = new ThenvoiRuntime(invalidConfig, callbacks);
-
-        await expect(invalidRuntime.connect()).rejects.toThrow();
+        await expect(invalidLink.connect()).rejects.toThrow();
       },
     );
   });
@@ -134,19 +159,18 @@ describe("E2E: Connection", () => {
     it.skipIf(!canRunE2E())(
       "should report correct connection state",
       async () => {
-        const callbacks: RuntimeCallbacks = {
-          onMessage: () => {},
-        };
+        link = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: config.apiKey,
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
+        });
 
-        runtime = new ThenvoiRuntime(config, callbacks);
+        expect(link.isConnected()).toBe(false);
 
-        expect(runtime.isConnected()).toBe(false);
-        expect(runtime.isReconnecting()).toBe(false);
+        await link.connect();
 
-        await runtime.connect();
-
-        expect(runtime.isConnected()).toBe(true);
-        expect(runtime.isReconnecting()).toBe(false);
+        expect(link.isConnected()).toBe(true);
       },
     );
   });

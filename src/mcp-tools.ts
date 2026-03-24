@@ -2,24 +2,27 @@
  * MCP Tools for Thenvoi platform operations.
  *
  * Exposes Thenvoi platform tools via MCP (Model Context Protocol)
- * for use by OpenClaw agents.
+ * for use by OpenClaw agents. Uses @thenvoi/sdk REST API.
  */
 
-import { getClient, getAgentId } from "./channel.js";
-import type {
-  AddContactParams,
-  AddParticipantParams,
-  CreateChatroomParams,
-  GetParticipantsParams,
-  ListContactRequestsParams,
-  ListContactsParams,
-  LookupPeersParams,
-  RemoveContactParams,
-  RemoveParticipantParams,
-  RespondContactRequestParams,
-  SendEventParams,
-  SendMessageParams,
-} from "./types.js";
+import { getLink, getAgentId } from "./channel.js";
+
+// =============================================================================
+// MCP Tool Types (local to this module)
+// =============================================================================
+
+interface LookupPeersParams { page?: number; page_size?: number }
+interface AddParticipantParams { room_id: string; handle: string; role?: string }
+interface RemoveParticipantParams { room_id: string; name: string }
+interface GetParticipantsParams { room_id: string }
+interface CreateChatroomParams { task_id?: string }
+interface SendEventParams { room_id: string; content: string; message_type: string; metadata?: Record<string, unknown> }
+interface SendMessageParams { room_id: string; content: string; mentions: string[] }
+interface ListContactsParams { page?: number; page_size?: number }
+interface AddContactParams { handle: string; message?: string }
+interface RemoveContactParams { handle?: string; contact_id?: string }
+interface ListContactRequestsParams { page?: number; page_size?: number; sent_status?: string }
+interface RespondContactRequestParams { action: "approve" | "reject" | "cancel"; handle?: string; request_id?: string }
 
 // =============================================================================
 // MCP Tool Definitions
@@ -44,6 +47,18 @@ interface McpProperty {
   default?: unknown;
   enum?: string[];
   items?: { type: string };
+}
+
+// =============================================================================
+// Helper: get REST API from link
+// =============================================================================
+
+function getRest() {
+  const link = getLink();
+  if (!link) {
+    throw new Error("Thenvoi client not connected");
+  }
+  return link.rest;
 }
 
 // =============================================================================
@@ -72,26 +87,22 @@ const lookupPeersTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { page = 1, page_size = 50 } = params as LookupPeersParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.lookupPeers(page, page_size);
+    const response = await rest.listPeers!({ page, pageSize: page_size, notInChat: "" });
 
     console.log("[thenvoi] lookupPeers response:", JSON.stringify(response, null, 2));
 
     const result = {
-      peers: response.peers.map((peer) => ({
+      peers: (response.data ?? []).map((peer) => ({
         id: peer.id,
         handle: peer.handle,
         name: peer.name,
         type: peer.type,
         description: peer.description,
       })),
-      total: response.total_count,
-      has_more: response.has_more,
+      total: response.metadata?.totalCount ?? 0,
+      has_more: (response.metadata?.page ?? 1) < (response.metadata?.totalPages ?? 1),
     };
 
     console.log("[thenvoi] lookupPeers returning:", JSON.stringify(result, null, 2));
@@ -133,37 +144,34 @@ const addParticipantTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { room_id, handle, role = "member" } = params as AddParticipantParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
+    const rest = getRest();
 
     // Lookup the peer to validate it exists and get canonical handle
-    const peersResponse = await client.lookupPeers(1, 100);
+    const peersResponse = await rest.listPeers!({ page: 1, pageSize: 100, notInChat: "" });
     const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
-    const peer = peersResponse.peers.find(
+    const peer = (peersResponse.data ?? []).find(
       (p) =>
-        p.name.toLowerCase() === normalizedHandle ||
+        p.name?.toLowerCase() === normalizedHandle ||
         p.handle?.toLowerCase() === normalizedHandle
     );
 
-    if (!peer) {
+    if (!peer || !peer.id) {
       throw new Error(
         `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
       );
     }
 
-    const response = await client.addParticipant(room_id, peer.id, role);
+    const response = await rest.addChatParticipant(room_id, { participantId: peer.id, role });
 
     return {
       success: true,
       participant: {
         id: peer.id,
-        name: response.name,
-        type: response.type,
-        role: response.role,
+        name: peer.name,
+        type: peer.type,
+        role,
       },
+      response,
     };
   },
 };
@@ -191,13 +199,9 @@ const removeParticipantTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { room_id, name } = params as RemoveParticipantParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    await client.removeParticipant(room_id, name);
+    await rest.removeChatParticipant(room_id, name);
 
     return {
       success: true,
@@ -225,19 +229,14 @@ const getParticipantsTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { room_id } = params as GetParticipantsParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const participants = await client.getParticipants(room_id);
+    const participants = await rest.listChatParticipants(room_id);
 
     return {
       participants: participants.map((p) => ({
         name: p.name,
         type: p.type,
-        role: p.role,
       })),
       count: participants.length,
     };
@@ -264,13 +263,9 @@ const createChatTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { task_id } = params as CreateChatroomParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.createChat(task_id);
+    const response = await rest.createChat(task_id);
 
     return {
       success: true,
@@ -321,18 +316,17 @@ const sendEventTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { room_id, content, message_type, metadata } = params as SendEventParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    // Send event with optional metadata
-    const response = await client.sendEvent(room_id, content, message_type, metadata);
+    const response = await rest.createChatEvent(room_id, {
+      content,
+      messageType: message_type,
+      metadata,
+    });
 
     return {
       success: true,
-      event_id: response.id,
+      event_id: (response as Record<string, unknown>).id,
       message_type,
     };
   },
@@ -371,24 +365,18 @@ const sendMessageTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { room_id, content, mentions } = params as SendMessageParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
+    const rest = getRest();
 
     if (!mentions || mentions.length === 0) {
       throw new Error("At least one mention is required to send a message");
     }
 
-    // Get the current agent's ID to avoid mentioning self
     const selfAgentId = getAgentId();
 
     // Get participants to resolve names to IDs
-    const participants = await client.getParticipants(room_id);
+    const participants = await rest.listChatParticipants(room_id);
 
     // Resolve mention names to participant objects
-    // When matching by name, exclude self to avoid "cannot mention yourself" error
     const resolvedMentions = mentions.map((name) => {
       const participant = participants.find(
         (p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== selfAgentId
@@ -401,12 +389,15 @@ const sendMessageTool: McpTool = {
       return { id: participant.id, name: participant.name };
     });
 
-    const response = await client.sendMessage(room_id, content, resolvedMentions);
+    const response = await rest.createChatMessage(room_id, {
+      content,
+      mentions: resolvedMentions,
+    });
 
     return {
       success: true,
-      message_id: response.id,
-      recipients: response.recipients,
+      message_id: (response as Record<string, unknown>).id,
+      response,
     };
   },
 };
@@ -435,16 +426,12 @@ const listContactsTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { page = 1, page_size = 50 } = params as ListContactsParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.listContacts(page, page_size);
+    const response = await rest.listContacts!({ page, pageSize: page_size });
 
     return {
-      contacts: response.contacts.map((c) => ({
+      contacts: (response.data ?? []).map((c) => ({
         id: c.id,
         handle: c.handle,
         name: c.name,
@@ -481,18 +468,13 @@ const addContactTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { handle, message } = params as AddContactParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.addContact(handle, message);
+    const response = await rest.addContact!({ handle, message });
 
     return {
       success: true,
-      id: response.id,
-      status: response.status,
+      ...response,
     };
   },
 };
@@ -519,17 +501,17 @@ const removeContactTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { handle, contact_id } = params as RemoveContactParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
+    const rest = getRest();
 
     if (!handle && !contact_id) {
       throw new Error("Either handle or contact_id is required");
     }
 
-    await client.removeContact(handle, contact_id);
+    const removeArgs = handle
+      ? { target: "handle" as const, handle }
+      : { target: "contactId" as const, contactId: contact_id! };
+
+    await rest.removeContact!(removeArgs);
 
     return {
       success: true,
@@ -571,23 +553,19 @@ const listContactRequestsTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { page = 1, page_size = 50, sent_status = "pending" } = params as ListContactRequestsParams;
-    const client = getClient();
+    const rest = getRest();
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.listContactRequests(page, page_size, sent_status);
+    const response = await rest.listContactRequests!({ page, pageSize: page_size, sentStatus: sent_status });
 
     return {
-      received: response.received.map((r) => ({
+      received: (response.received ?? []).map((r) => ({
         id: r.id,
         from_handle: r.from_handle,
         from_name: r.from_name,
         message: r.message,
         status: r.status,
       })),
-      sent: response.sent.map((s) => ({
+      sent: (response.sent ?? []).map((s) => ({
         id: s.id,
         to_handle: s.to_handle,
         to_name: s.to_name,
@@ -630,22 +608,21 @@ const respondContactRequestTool: McpTool = {
   },
   handler: async (params: unknown) => {
     const { action, handle, request_id } = params as RespondContactRequestParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
+    const rest = getRest();
 
     if (!handle && !request_id) {
       throw new Error("Either handle or request_id is required");
     }
 
-    const response = await client.respondContactRequest(action, handle, request_id);
+    const respondArgs = handle
+      ? { action, target: "handle" as const, handle }
+      : { action, target: "requestId" as const, requestId: request_id! };
+
+    const response = await rest.respondContactRequest!(respondArgs);
 
     return {
       success: true,
-      id: response.id,
-      status: response.status,
+      ...response,
     };
   },
 };

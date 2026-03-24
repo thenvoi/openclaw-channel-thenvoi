@@ -5,13 +5,22 @@
  * Requires THENVOI_API_KEY, THENVOI_AGENT_ID, and THENVOI_API_KEY_USER environment variables.
  */
 
-import type { ThenvoiConfig } from "../../src/types.js";
+/**
+ * Configuration shape for E2E tests, matching ThenvoiLink constructor options.
+ */
+export interface E2EConfig {
+  apiKey: string;
+  agentId: string;
+  userId: string;
+  wsUrl: string;
+  restUrl: string;
+}
 
 /**
  * Get E2E test configuration from environment variables.
  * Throws if required variables are not set.
  */
-export function getE2EConfig(): ThenvoiConfig {
+export function getE2EConfig(): E2EConfig {
   const apiKey = process.env.THENVOI_API_KEY;
   const agentId = process.env.THENVOI_AGENT_ID;
   const userId = process.env.THENVOI_API_KEY_USER;

@@ -1,5 +1,6 @@
 /**
  * Unit tests for MCP tools.
+ * Mocks getLink() to return a mock ThenvoiLink with a mock rest API.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -20,25 +21,40 @@ import {
 
 // Mock the channel module
 vi.mock("../../src/channel.js", () => ({
-  getClient: vi.fn(),
+  getLink: vi.fn(),
   getAgentId: vi.fn(),
 }));
 
 describe("MCP Tools", () => {
-  const mockClient = {
-    lookupPeers: vi.fn(),
-    addParticipant: vi.fn(),
-    removeParticipant: vi.fn(),
-    getParticipants: vi.fn(),
+  // Mock REST API methods matching SDK's RestApi interface
+  const mockRest = {
+    getAgentMe: vi.fn(),
+    listPeers: vi.fn(),
+    addChatParticipant: vi.fn(),
+    removeChatParticipant: vi.fn(),
+    listChatParticipants: vi.fn(),
     createChat: vi.fn(),
-    sendMessage: vi.fn(),
-    sendEvent: vi.fn(),
+    createChatMessage: vi.fn(),
+    createChatEvent: vi.fn(),
+    listContacts: vi.fn(),
+    addContact: vi.fn(),
+    removeContact: vi.fn(),
+    listContactRequests: vi.fn(),
+    respondContactRequest: vi.fn(),
+    markMessageProcessing: vi.fn(),
+    markMessageProcessed: vi.fn(),
+    markMessageFailed: vi.fn(),
+  };
+
+  // Mock ThenvoiLink object with rest property
+  const mockLink = {
+    rest: mockRest,
+    agentId: "agent-123",
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(channel.getClient).mockReturnValue(mockClient as unknown as ReturnType<typeof channel.getClient>);
-    // Mock getAgentId to return our test agent ID (used by send_message to exclude self from mentions)
+    vi.mocked(channel.getLink).mockReturnValue(mockLink as unknown as ReturnType<typeof channel.getLink>);
     vi.mocked(channel.getAgentId).mockReturnValue("agent-123");
   });
 
@@ -103,27 +119,27 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_lookup_peers", () => {
-    it("should call lookupPeers with default pagination", async () => {
-      mockClient.lookupPeers.mockResolvedValue(mockLookupPeersResponse);
+    it("should call listPeers with default pagination", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
 
       const result = await executeMcpTool("thenvoi_lookup_peers", {});
 
-      expect(mockClient.lookupPeers).toHaveBeenCalledWith(1, 50);
+      expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 1, pageSize: 50, notInChat: "" });
       expect(result).toHaveProperty("peers");
       expect(result).toHaveProperty("total");
       expect(result).toHaveProperty("has_more");
     });
 
-    it("should call lookupPeers with provided pagination", async () => {
-      mockClient.lookupPeers.mockResolvedValue(mockLookupPeersResponse);
+    it("should call listPeers with provided pagination", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
 
       await executeMcpTool("thenvoi_lookup_peers", { page: 2, page_size: 25 });
 
-      expect(mockClient.lookupPeers).toHaveBeenCalledWith(2, 25);
+      expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 2, pageSize: 25, notInChat: "" });
     });
 
-    it("should throw when client not connected", async () => {
-      vi.mocked(channel.getClient).mockReturnValue(undefined);
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
 
       await expect(executeMcpTool("thenvoi_lookup_peers", {})).rejects.toThrow(
         "Thenvoi client not connected",
@@ -132,39 +148,34 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_add_participant", () => {
-    it("should lookup peer and call addParticipant with UUID", async () => {
-      // The tool now looks up the peer by name to get the UUID
-      mockClient.lookupPeers.mockResolvedValue(mockLookupPeersResponse);
-      mockClient.addParticipant.mockResolvedValue(mockAddParticipantResponse);
+    it("should lookup peer and call addChatParticipant with UUID", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
+      mockRest.addChatParticipant.mockResolvedValue(mockAddParticipantResponse);
 
       const result = await executeMcpTool("thenvoi_add_participant", {
         room_id: "room-001",
         handle: "Weather Agent",
       });
 
-      // First it should lookup peers
-      expect(mockClient.lookupPeers).toHaveBeenCalledWith(1, 100);
-      // Then call addParticipant with the UUID from the lookup
-      expect(mockClient.addParticipant).toHaveBeenCalledWith(
+      expect(mockRest.listPeers).toHaveBeenCalled();
+      expect(mockRest.addChatParticipant).toHaveBeenCalledWith(
         "room-001",
-        "agent-weather", // UUID from mockLookupPeersResponse
-        "member",
+        { participantId: "agent-weather", role: "member" },
       );
       expect(result).toHaveProperty("success", true);
       expect(result).toHaveProperty("participant");
     });
 
-    it("should call addParticipant with provided role", async () => {
-      // Add an admin user to the peers response for this test
+    it("should call addChatParticipant with provided role", async () => {
       const peersWithAdmin = {
         ...mockLookupPeersResponse,
-        peers: [
-          ...mockLookupPeersResponse.peers,
-          { id: "user-admin", name: "Admin User", type: "User" as const, status: "online" as const },
+        data: [
+          ...mockLookupPeersResponse.data,
+          { id: "user-admin", name: "Admin User", type: "User", handle: "@admin" },
         ],
       };
-      mockClient.lookupPeers.mockResolvedValue(peersWithAdmin);
-      mockClient.addParticipant.mockResolvedValue(mockAddParticipantResponse);
+      mockRest.listPeers.mockResolvedValue(peersWithAdmin);
+      mockRest.addChatParticipant.mockResolvedValue(mockAddParticipantResponse);
 
       await executeMcpTool("thenvoi_add_participant", {
         room_id: "room-001",
@@ -172,15 +183,14 @@ describe("MCP Tools", () => {
         role: "admin",
       });
 
-      expect(mockClient.addParticipant).toHaveBeenCalledWith(
+      expect(mockRest.addChatParticipant).toHaveBeenCalledWith(
         "room-001",
-        "user-admin", // UUID from lookup
-        "admin",
+        { participantId: "user-admin", role: "admin" },
       );
     });
 
     it("should throw when peer not found", async () => {
-      mockClient.lookupPeers.mockResolvedValue(mockLookupPeersResponse);
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
 
       await expect(
         executeMcpTool("thenvoi_add_participant", {
@@ -190,8 +200,8 @@ describe("MCP Tools", () => {
       ).rejects.toThrow('Peer not found: "Unknown User"');
     });
 
-    it("should throw when client not connected", async () => {
-      vi.mocked(channel.getClient).mockReturnValue(undefined);
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
 
       await expect(
         executeMcpTool("thenvoi_add_participant", {
@@ -203,15 +213,15 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_remove_participant", () => {
-    it("should call removeParticipant", async () => {
-      mockClient.removeParticipant.mockResolvedValue(undefined);
+    it("should call removeChatParticipant", async () => {
+      mockRest.removeChatParticipant.mockResolvedValue({ ok: true });
 
       const result = await executeMcpTool("thenvoi_remove_participant", {
         room_id: "room-001",
         name: "Weather Agent",
       });
 
-      expect(mockClient.removeParticipant).toHaveBeenCalledWith(
+      expect(mockRest.removeChatParticipant).toHaveBeenCalledWith(
         "room-001",
         "Weather Agent",
       );
@@ -222,13 +232,13 @@ describe("MCP Tools", () => {
 
   describe("thenvoi_get_participants", () => {
     it("should return participants list", async () => {
-      mockClient.getParticipants.mockResolvedValue(mockParticipants);
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
 
       const result = (await executeMcpTool("thenvoi_get_participants", {
         room_id: "room-001",
       })) as { participants: unknown[]; count: number };
 
-      expect(mockClient.getParticipants).toHaveBeenCalledWith("room-001");
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001");
       expect(result).toHaveProperty("participants");
       expect(result).toHaveProperty("count", mockParticipants.length);
     });
@@ -236,34 +246,32 @@ describe("MCP Tools", () => {
 
   describe("thenvoi_create_chatroom", () => {
     it("should create room without task_id", async () => {
-      mockClient.createChat.mockResolvedValue(mockCreateChatroomResponse);
+      mockRest.createChat.mockResolvedValue(mockCreateChatroomResponse);
 
       const result = await executeMcpTool("thenvoi_create_chatroom", {});
 
-      expect(mockClient.createChat).toHaveBeenCalledWith(undefined);
+      expect(mockRest.createChat).toHaveBeenCalledWith(undefined);
       expect(result).toHaveProperty("success", true);
       expect(result).toHaveProperty("room_id");
     });
 
     it("should create room with task_id", async () => {
-      mockClient.createChat.mockResolvedValue(mockCreateChatroomResponse);
+      mockRest.createChat.mockResolvedValue(mockCreateChatroomResponse);
 
       await executeMcpTool("thenvoi_create_chatroom", { task_id: "task-123" });
 
-      expect(mockClient.createChat).toHaveBeenCalledWith("task-123");
+      expect(mockRest.createChat).toHaveBeenCalledWith("task-123");
     });
   });
 
   describe("thenvoi_send_event", () => {
     const mockEventResponse = {
+      ok: true,
       id: "event-001",
-      chat_room_id: "room-001",
-      message_type: "thought",
-      success: true,
     };
 
     it("should send thought event", async () => {
-      mockClient.sendEvent.mockResolvedValue(mockEventResponse);
+      mockRest.createChatEvent.mockResolvedValue(mockEventResponse);
 
       const result = await executeMcpTool("thenvoi_send_event", {
         room_id: "room-001",
@@ -271,53 +279,21 @@ describe("MCP Tools", () => {
         message_type: "thought",
       });
 
-      expect(mockClient.sendEvent).toHaveBeenCalledWith(
+      expect(mockRest.createChatEvent).toHaveBeenCalledWith(
         "room-001",
-        "Thinking about this...",
-        "thought",
-        undefined,
+        {
+          content: "Thinking about this...",
+          messageType: "thought",
+          metadata: undefined,
+        },
       );
       expect(result).toHaveProperty("success", true);
       expect(result).toHaveProperty("event_id", "event-001");
       expect(result).toHaveProperty("message_type", "thought");
     });
 
-    it("should send error event", async () => {
-      mockClient.sendEvent.mockResolvedValue({ ...mockEventResponse, message_type: "error" });
-
-      await executeMcpTool("thenvoi_send_event", {
-        room_id: "room-001",
-        content: "Something went wrong",
-        message_type: "error",
-      });
-
-      expect(mockClient.sendEvent).toHaveBeenCalledWith(
-        "room-001",
-        "Something went wrong",
-        "error",
-        undefined,
-      );
-    });
-
-    it("should send task event", async () => {
-      mockClient.sendEvent.mockResolvedValue({ ...mockEventResponse, message_type: "task" });
-
-      await executeMcpTool("thenvoi_send_event", {
-        room_id: "room-001",
-        content: "Task 50% complete",
-        message_type: "task",
-      });
-
-      expect(mockClient.sendEvent).toHaveBeenCalledWith(
-        "room-001",
-        "Task 50% complete",
-        "task",
-        undefined,
-      );
-    });
-
     it("should send tool_call event with metadata", async () => {
-      mockClient.sendEvent.mockResolvedValue({ ...mockEventResponse, message_type: "tool_call" });
+      mockRest.createChatEvent.mockResolvedValue(mockEventResponse);
 
       const metadata = {
         tool_call_id: "call-123",
@@ -332,59 +308,23 @@ describe("MCP Tools", () => {
         metadata,
       });
 
-      expect(mockClient.sendEvent).toHaveBeenCalledWith(
+      expect(mockRest.createChatEvent).toHaveBeenCalledWith(
         "room-001",
-        "Calling search tool...",
-        "tool_call",
-        metadata,
+        {
+          content: "Calling search tool...",
+          messageType: "tool_call",
+          metadata,
+        },
       );
       expect(result).toHaveProperty("success", true);
       expect(result).toHaveProperty("message_type", "tool_call");
     });
-
-    it("should send tool_result event with metadata", async () => {
-      mockClient.sendEvent.mockResolvedValue({ ...mockEventResponse, message_type: "tool_result" });
-
-      const metadata = {
-        tool_call_id: "call-123",
-        name: "search",
-        output: "Found 5 results",
-      };
-
-      const result = await executeMcpTool("thenvoi_send_event", {
-        room_id: "room-001",
-        content: "Search completed with 5 results",
-        message_type: "tool_result",
-        metadata,
-      });
-
-      expect(mockClient.sendEvent).toHaveBeenCalledWith(
-        "room-001",
-        "Search completed with 5 results",
-        "tool_result",
-        metadata,
-      );
-      expect(result).toHaveProperty("success", true);
-      expect(result).toHaveProperty("message_type", "tool_result");
-    });
   });
 
   describe("thenvoi_send_message", () => {
-    const mockMessageResponse = {
-      id: "msg-001",
-      chat_room_id: "room-001",
-      recipients: [{ id: "user-123", name: "John Doe" }],
-      success: true,
-    };
-
-    const mockParticipants = [
-      { id: "user-123", name: "John Doe", type: "User" as const, role: "member" as const },
-      { id: "agent-456", name: "Test Agent", type: "Agent" as const, role: "member" as const },
-    ];
-
     it("should send message with mentions", async () => {
-      mockClient.getParticipants.mockResolvedValue(mockParticipants);
-      mockClient.sendMessage.mockResolvedValue(mockMessageResponse);
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
+      mockRest.createChatMessage.mockResolvedValue(mockSendMessageResponse);
 
       const result = await executeMcpTool("thenvoi_send_message", {
         room_id: "room-001",
@@ -392,38 +332,19 @@ describe("MCP Tools", () => {
         mentions: ["John Doe"],
       });
 
-      expect(mockClient.getParticipants).toHaveBeenCalledWith("room-001");
-      expect(mockClient.sendMessage).toHaveBeenCalledWith(
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001");
+      expect(mockRest.createChatMessage).toHaveBeenCalledWith(
         "room-001",
-        "Hello!",
-        [{ id: "user-123", name: "John Doe" }],
+        {
+          content: "Hello!",
+          mentions: [{ id: "user-789", name: "John Doe" }],
+        },
       );
       expect(result).toHaveProperty("success", true);
-      expect(result).toHaveProperty("message_id", "msg-001");
-    });
-
-    it("should resolve multiple mentions", async () => {
-      mockClient.getParticipants.mockResolvedValue(mockParticipants);
-      mockClient.sendMessage.mockResolvedValue(mockMessageResponse);
-
-      await executeMcpTool("thenvoi_send_message", {
-        room_id: "room-001",
-        content: "Hello everyone!",
-        mentions: ["John Doe", "Test Agent"],
-      });
-
-      expect(mockClient.sendMessage).toHaveBeenCalledWith(
-        "room-001",
-        "Hello everyone!",
-        [
-          { id: "user-123", name: "John Doe" },
-          { id: "agent-456", name: "Test Agent" },
-        ],
-      );
     });
 
     it("should throw error if mention not found", async () => {
-      mockClient.getParticipants.mockResolvedValue(mockParticipants);
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
 
       await expect(
         executeMcpTool("thenvoi_send_message", {

@@ -45,13 +45,11 @@
     "demo:logs": "cd demo && docker compose logs -f"
   },
   "dependencies": {
-    "phoenix": "^1.7.14",
-    "ws": "^8.19.0"
+    "@thenvoi/sdk": "github:thenvoi/thenvoi-sdk-typescript"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.0.0",
-    "@types/ws": "^8.18.1",
     "eslint": "^9.0.0",
     "openclaw": "^2026.3.13",
     "prettier": "^3.0.0",
