@@ -29,6 +29,7 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
+    "postinstall": "bash scripts/build-sdk.sh",
     "build": "tsup && cp openclaw.plugin.json dist/",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
