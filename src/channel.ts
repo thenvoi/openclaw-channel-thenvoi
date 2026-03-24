@@ -552,11 +552,12 @@ export const thenvoiChannel: OpenClawChannel = {
     validateConfig: async (
       config: ThenvoiAccountConfig,
     ): Promise<ValidationResult> => {
+      let testLink: ThenvoiLink | null = null;
       try {
         const resolved = resolveConfig(config);
 
         // Test connection by creating a temporary link and fetching agent metadata
-        const testLink = new ThenvoiLink({
+        testLink = new ThenvoiLink({
           agentId: resolved.agentId,
           apiKey: resolved.apiKey,
           wsUrl: resolved.wsUrl,
@@ -568,6 +569,10 @@ export const thenvoiChannel: OpenClawChannel = {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { valid: false, errors: [message] };
+      } finally {
+        if (testLink) {
+          try { await testLink.disconnect(); } catch { /* ignore cleanup errors */ }
+        }
       }
     },
   },
@@ -716,18 +721,19 @@ export const thenvoiChannel: OpenClawChannel = {
         }
       };
 
+      // Create a singleton ContactEventHandler for this account
+      // (maintains dedup state, hub room ID, and request cache across events)
+      const contactHandler = new ContactEventHandler({
+        config: { strategy: "hub_room", broadcastChanges: true },
+        rest: link.rest,
+        onBroadcast: (msg: string) => {
+          console.log(`[thenvoi:${accountId}] Contact broadcast: ${msg}`);
+        },
+      });
+
       // Handle contact events
       presence.onContactEvent = async (event: ContactEvent) => {
         console.log(`[thenvoi:${accountId}] Contact event: ${event.type}`);
-        // Contact events are dispatched through the room event handler
-        // by creating a synthetic inbound message for the contacts thread
-        const contactHandler = new ContactEventHandler({
-          config: { strategy: "hub_room", broadcastChanges: true },
-          rest: link.rest,
-          onBroadcast: (msg: string) => {
-            console.log(`[thenvoi:${accountId}] Contact broadcast: ${msg}`);
-          },
-        });
         await contactHandler.handle(event);
       };
 
