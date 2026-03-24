@@ -18,18 +18,24 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 
 # Get the git commit hash from the installed package
 SDK_RESOLVED=$(node -e "const p=require('./$SDK_DIR/package.json'); console.log(p._resolved || '')")
-SDK_COMMIT=$(echo "$SDK_RESOLVED" | grep -o '[a-f0-9]\{40\}' || true)
+SDK_COMMIT=$(echo "$SDK_RESOLVED" | grep -oE '[a-f0-9]{40}' || true)
 
-echo "[build-sdk] Cloning thenvoi-sdk-typescript${SDK_COMMIT:+ at $SDK_COMMIT}..."
-git clone --depth 1 ${SDK_COMMIT:+--branch dev} https://github.com/thenvoi/thenvoi-sdk-typescript.git "$TEMP_DIR/sdk" 2>/dev/null
-
-cd "$TEMP_DIR/sdk"
+if [ -n "$SDK_COMMIT" ]; then
+  echo "[build-sdk] Cloning thenvoi-sdk-typescript at $SDK_COMMIT..."
+  git clone https://github.com/thenvoi/thenvoi-sdk-typescript.git "$TEMP_DIR/sdk"
+  cd "$TEMP_DIR/sdk"
+  git checkout "$SDK_COMMIT"
+else
+  echo "[build-sdk] No pinned commit found, cloning default branch..."
+  git clone --depth 1 https://github.com/thenvoi/thenvoi-sdk-typescript.git "$TEMP_DIR/sdk"
+  cd "$TEMP_DIR/sdk"
+fi
 
 echo "[build-sdk] Installing SDK dependencies..."
-npm install --legacy-peer-deps --ignore-scripts 2>/dev/null
+npm install --legacy-peer-deps --ignore-scripts
 
 echo "[build-sdk] Building SDK..."
-npx tsup --config tsup.config.ts 2>/dev/null
+npx tsup --config tsup.config.ts
 
 echo "[build-sdk] Copying dist to $SDK_DIR..."
 cp -r dist "$OLDPWD/$SDK_DIR/"

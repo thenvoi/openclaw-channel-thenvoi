@@ -4,9 +4,6 @@
 
 import { vi, beforeEach, afterEach } from "vitest";
 
-// Mock phoenix module globally
-vi.mock("phoenix", () => import("./__mocks__/phoenix.js"));
-
 // Store original fetch
 const originalFetch = globalThis.fetch;
 

@@ -155,7 +155,6 @@ export { ThenvoiLink } from "@thenvoi/sdk";
 export type {
   AgentIdentity,
   ChatParticipant,
-  RestApi,
 } from "@thenvoi/sdk/rest";
 
 export { ContactEventHandler, RoomPresence } from "@thenvoi/sdk/runtime";

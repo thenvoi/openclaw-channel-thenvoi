@@ -9,15 +9,7 @@
 
 import { ThenvoiLink } from "@thenvoi/sdk";
 import { RoomPresence, ContactEventHandler } from "@thenvoi/sdk/runtime";
-import type { RestApi } from "@thenvoi/sdk/rest";
 import type { ContactEventConfig, ContactEvent, PlatformEvent } from "@thenvoi/sdk";
-
-// SDK types used internally but not exported from entry points — define structurally
-interface MentionReference {
-  id: string;
-  name?: string;
-  handle?: string;
-}
 
 // =============================================================================
 // OpenClaw-Specific Types
@@ -29,7 +21,6 @@ export interface ThenvoiAccountConfig {
   agentId?: string;
   wsUrl?: string;
   restUrl?: string;
-  stateDir?: string;
   contactConfig?: ContactEventConfig;
 }
 
@@ -42,13 +33,6 @@ export interface OpenClawInboundMessage {
   text: string;
   timestamp: string;
   metadata?: Record<string, unknown>;
-}
-
-interface ThenvoiConfig {
-  apiKey: string;
-  agentId: string;
-  wsUrl: string;
-  restUrl: string;
 }
 
 // =============================================================================
@@ -262,7 +246,7 @@ export function deliverMessage(message: OpenClawInboundMessage): void {
 // Configuration Helpers
 // =============================================================================
 
-function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
+function resolveConfig(account: ThenvoiAccountConfig): { apiKey: string; agentId: string; wsUrl: string; restUrl: string } {
   const apiKey = account.apiKey ?? process.env.THENVOI_API_KEY;
   const agentId = account.agentId ?? process.env.THENVOI_AGENT_ID;
   const wsUrl = account.wsUrl ?? process.env.THENVOI_WS_URL ?? "wss://app.thenvoi.com/api/v1/socket";
@@ -282,21 +266,47 @@ function resolveConfig(account: ThenvoiAccountConfig): ThenvoiConfig {
 // Mention Resolution
 // =============================================================================
 
+type Mention = { id: string; name?: string };
+
 /**
- * Find participants mentioned in text using @Name pattern.
+ * Resolve mentions for a message: find @Name in text, fall back to last sender, then any participant.
+ * Returns null if no participants are available to mention (caller decides how to handle).
  */
-function findMentionedParticipants(
+async function resolveMentions(
+  rest: ThenvoiLink["rest"],
+  roomId: string,
   text: string,
-  participants: Array<{ id: string; name: string }>,
-  agentId: string,
-): MentionReference[] {
-  const mentioned: MentionReference[] = [];
+): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
+  const participants = await rest.listChatParticipants(roomId);
+  const agent = await rest.getAgentMe();
+
+  // 1. Explicit @Name mentions in text
+  const mentioned: Mention[] = [];
   for (const p of participants) {
-    if (p.id !== agentId && text.includes(`@${p.name}`)) {
+    if (p.id !== agent.id && text.includes(`@${p.name}`)) {
       mentioned.push({ id: p.id, name: p.name });
     }
   }
-  return mentioned;
+  if (mentioned.length > 0) return { mentions: mentioned, participants };
+
+  // 2. Fallback: last sender in this thread
+  const lastSender = lastSenderByThread.get(roomId);
+  if (lastSender) {
+    const senderParticipant = participants.find(
+      (p) => p.id === lastSender.senderId && p.id !== agent.id
+    );
+    if (senderParticipant) {
+      return { mentions: [{ id: senderParticipant.id, name: senderParticipant.name }], participants };
+    }
+  }
+
+  // 3. Fallback: first other participant
+  const other = participants.find((p) => p.id !== agent.id);
+  if (other) {
+    return { mentions: [{ id: other.id, name: other.name }], participants };
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -306,7 +316,7 @@ function findMentionedParticipants(
 /**
  * Send a reply back to Thenvoi using the SDK's REST API.
  */
-async function sendReplyToThenvoi(rest: RestApi, roomId: string, payload: unknown): Promise<void> {
+async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], roomId: string, payload: unknown): Promise<void> {
   const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
   if (!text) {
     console.warn("[thenvoi] No text in reply payload, skipping");
@@ -314,36 +324,12 @@ async function sendReplyToThenvoi(rest: RestApi, roomId: string, payload: unknow
   }
 
   try {
-    // Get participants for mention resolution
-    const participants = await rest.listChatParticipants(roomId);
-    const agent = await rest.getAgentMe();
-
-    // Find participants mentioned in text via @Name pattern
-    let mentions = findMentionedParticipants(text, participants, agent.id);
-
-    // Fallback: prefer last sender, then any other participant
-    if (mentions.length === 0) {
-      const lastSender = lastSenderByThread.get(roomId);
-      if (lastSender) {
-        const senderParticipant = participants.find(
-          (p) => p.id === lastSender.senderId && p.id !== agent.id
-        );
-        if (senderParticipant) {
-          mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
-        }
-      }
+    const resolved = await resolveMentions(rest, roomId, text);
+    if (!resolved) {
+      console.warn("[thenvoi] No participants to mention, skipping reply");
+      return;
     }
-
-    if (mentions.length === 0) {
-      const otherParticipant = participants.find((p) => p.id !== agent.id);
-      if (!otherParticipant) {
-        console.warn("[thenvoi] No participants to mention, skipping reply");
-        return;
-      }
-      mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
-    }
-
-    await rest.createChatMessage(roomId, { content: text, mentions });
+    await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
     console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
   } catch (error) {
     console.error("[thenvoi] Failed to send reply:", error);
@@ -445,8 +431,6 @@ export const thenvoiChannel: OpenClawChannel = {
       const { text, to, accountId } = ctx;
       const roomId = to;
 
-      console.log("[thenvoi] sendText called with:", JSON.stringify({ to, text: text.substring(0, 50), accountId }));
-
       if (!roomId) {
         throw new Error("room_id is required");
       }
@@ -455,51 +439,24 @@ export const thenvoiChannel: OpenClawChannel = {
       if (!link) {
         throw new Error("Thenvoi link not initialized");
       }
-      const rest = link.rest;
 
-      // Get participants for mention resolution
-      const participants = await rest.listChatParticipants(roomId);
-      const agent = await rest.getAgentMe();
-
-      let mentions: MentionReference[] = findMentionedParticipants(text, participants, agent.id);
-
-      // Fallback: prefer the last sender (the person we're replying to)
-      if (mentions.length === 0) {
-        const lastSender = lastSenderByThread.get(roomId);
-        if (lastSender) {
-          const senderParticipant = participants.find(
-            (p) => p.id === lastSender.senderId && p.id !== agent.id
-          );
-          if (senderParticipant) {
-            mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
-          }
-        }
+      const resolved = await resolveMentions(link.rest, roomId, text);
+      if (!resolved) {
+        throw new Error("Cannot send message: no other participants to mention");
       }
 
-      if (mentions.length === 0) {
-        const otherParticipant = participants.find((p) => p.id !== agent.id);
-        if (!otherParticipant) {
-          throw new Error("Cannot send message: no other participants to mention");
-        }
-        mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
-      }
-
-      const result = await rest.createChatMessage(roomId, { content: text, mentions });
-      console.log("[thenvoi] sendText result:", JSON.stringify(result));
+      const result = await link.rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
 
       return {
         channel: "thenvoi",
-        messageId: (result as Record<string, unknown>).id as string ?? `thenvoi-${Date.now()}`,
+        messageId: String(result.id ?? `thenvoi-${Date.now()}`),
         roomId,
       };
     },
 
     sendMedia: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
-      // Thenvoi doesn't support media yet - send as text with URL
       const { text, to, mediaUrl, accountId } = ctx;
       const roomId = to;
-
-      console.log("[thenvoi] sendMedia called - converting to text with URL");
 
       if (!roomId) {
         throw new Error("room_id is required");
@@ -509,40 +466,19 @@ export const thenvoiChannel: OpenClawChannel = {
       if (!link) {
         throw new Error("Thenvoi link not initialized");
       }
-      const rest = link.rest;
 
       const messageText = mediaUrl ? `${text}\n\n${mediaUrl}` : text;
 
-      const participants = await rest.listChatParticipants(roomId);
-      const agent = await rest.getAgentMe();
-
-      let mentions: MentionReference[] = findMentionedParticipants(messageText, participants, agent.id);
-
-      if (mentions.length === 0) {
-        const lastSender = lastSenderByThread.get(roomId);
-        if (lastSender) {
-          const senderParticipant = participants.find(
-            (p) => p.id === lastSender.senderId && p.id !== agent.id
-          );
-          if (senderParticipant) {
-            mentions = [{ id: senderParticipant.id, name: senderParticipant.name }];
-          }
-        }
+      const resolved = await resolveMentions(link.rest, roomId, messageText);
+      if (!resolved) {
+        throw new Error("Cannot send message: no other participants to mention");
       }
 
-      if (mentions.length === 0) {
-        const otherParticipant = participants.find((p) => p.id !== agent.id);
-        if (!otherParticipant) {
-          throw new Error("Cannot send message: no other participants to mention");
-        }
-        mentions = [{ id: otherParticipant.id, name: otherParticipant.name }];
-      }
-
-      const result = await rest.createChatMessage(roomId, { content: messageText, mentions });
+      const result = await link.rest.createChatMessage(roomId, { content: messageText, mentions: resolved.mentions });
 
       return {
         channel: "thenvoi",
-        messageId: (result as Record<string, unknown>).id as string ?? `thenvoi-${Date.now()}`,
+        messageId: String(result.id ?? `thenvoi-${Date.now()}`),
         roomId,
       };
     },

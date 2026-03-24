@@ -62,13 +62,18 @@ function getRest() {
 }
 
 /**
- * Assert that an optional REST method exists before calling it.
+ * Assert that an optional REST method exists and return it bound to the rest object.
  */
-function requireMethod<T>(method: T | undefined, name: string): T {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function requireMethod<T extends (...args: any[]) => any>(
+  rest: object,
+  method: T | undefined,
+  name: string,
+): T {
   if (!method) {
     throw new Error(`REST method "${name}" is not available on this API adapter`);
   }
-  return method;
+  return method.bind(rest) as T;
 }
 
 // =============================================================================
@@ -99,7 +104,7 @@ const lookupPeersTool: McpTool = {
     const { page = 1, page_size = 50 } = params as LookupPeersParams;
     const rest = getRest();
 
-    const response = await requireMethod(rest.listPeers, "listPeers").bind(rest)({ page, pageSize: page_size, notInChat: "" });
+    const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize: page_size, notInChat: "" });
 
     console.log("[thenvoi] lookupPeers response:", JSON.stringify(response, null, 2));
 
@@ -157,7 +162,7 @@ const addParticipantTool: McpTool = {
     const rest = getRest();
 
     // Lookup the peer to validate it exists and get canonical handle
-    const peersResponse = await requireMethod(rest.listPeers, "listPeers").bind(rest)({ page: 1, pageSize: 100, notInChat: "" });
+    const peersResponse = await requireMethod(rest, rest.listPeers, "listPeers")({ page: 1, pageSize: 100, notInChat: "" });
     const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
     const peer = (peersResponse.data ?? []).find(
       (p) =>
@@ -336,7 +341,7 @@ const sendEventTool: McpTool = {
 
     return {
       success: true,
-      event_id: (response as Record<string, unknown>).id,
+      event_id: response.id,
       message_type,
     };
   },
@@ -406,7 +411,7 @@ const sendMessageTool: McpTool = {
 
     return {
       success: true,
-      message_id: (response as Record<string, unknown>).id,
+      message_id: response.id,
       response,
     };
   },
@@ -438,7 +443,7 @@ const listContactsTool: McpTool = {
     const { page = 1, page_size = 50 } = params as ListContactsParams;
     const rest = getRest();
 
-    const response = await requireMethod(rest.listContacts, "listContacts").bind(rest)({ page, pageSize: page_size });
+    const response = await requireMethod(rest, rest.listContacts, "listContacts")({ page, pageSize: page_size });
 
     return {
       contacts: (response.data ?? []).map((c) => ({
@@ -480,7 +485,7 @@ const addContactTool: McpTool = {
     const { handle, message } = params as AddContactParams;
     const rest = getRest();
 
-    const response = await requireMethod(rest.addContact, "addContact").bind(rest)({ handle, message });
+    const response = await requireMethod(rest, rest.addContact, "addContact")({ handle, message });
 
     return {
       success: true,
@@ -521,7 +526,7 @@ const removeContactTool: McpTool = {
       ? { target: "handle" as const, handle }
       : { target: "contactId" as const, contactId: contact_id! };
 
-    await requireMethod(rest.removeContact, "removeContact").bind(rest)(removeArgs);
+    await requireMethod(rest, rest.removeContact, "removeContact")(removeArgs);
 
     return {
       success: true,
@@ -565,7 +570,7 @@ const listContactRequestsTool: McpTool = {
     const { page = 1, page_size = 50, sent_status = "pending" } = params as ListContactRequestsParams;
     const rest = getRest();
 
-    const response = await requireMethod(rest.listContactRequests, "listContactRequests").bind(rest)({ page, pageSize: page_size, sentStatus: sent_status });
+    const response = await requireMethod(rest, rest.listContactRequests, "listContactRequests")({ page, pageSize: page_size, sentStatus: sent_status });
 
     return {
       received: (response.received ?? []).map((r) => ({
@@ -628,7 +633,7 @@ const respondContactRequestTool: McpTool = {
       ? { action, target: "handle" as const, handle }
       : { action, target: "requestId" as const, requestId: request_id! };
 
-    const response = await requireMethod(rest.respondContactRequest, "respondContactRequest").bind(rest)(respondArgs);
+    const response = await requireMethod(rest, rest.respondContactRequest, "respondContactRequest")(respondArgs);
 
     return {
       success: true,
