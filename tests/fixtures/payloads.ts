@@ -78,3 +78,60 @@ export const mockAddParticipantResponse = {
 export const mockCreateChatroomResponse = {
   id: "room-new-001",
 };
+
+// =============================================================================
+// Contact Fixtures
+// =============================================================================
+
+export const mockContacts = [
+  { id: "contact-001", handle: "@jane", name: "Jane Smith", type: "User" },
+  { id: "contact-002", handle: "@weather-agent", name: "Weather Agent", type: "Agent" },
+];
+
+export const mockListContactsResponse = {
+  data: mockContacts,
+  metadata: {
+    page: 1,
+    pageSize: 50,
+    totalCount: 2,
+    totalPages: 1,
+  },
+};
+
+export const mockAddContactResponse = {
+  id: "request-001",
+  status: "pending",
+  to_handle: "@jane",
+};
+
+export const mockListContactRequestsResponse = {
+  received: [
+    {
+      id: "req-recv-001",
+      from_handle: "@alice",
+      from_name: "Alice",
+      message: "Hi, let's connect!",
+      status: "pending",
+    },
+  ],
+  sent: [
+    {
+      id: "req-sent-001",
+      to_handle: "@bob",
+      to_name: "Bob",
+      message: "Want to collaborate?",
+      status: "pending",
+    },
+  ],
+  metadata: {
+    page: 1,
+    pageSize: 50,
+    totalCount: 2,
+    totalPages: 1,
+  },
+};
+
+export const mockRespondContactRequestResponse = {
+  id: "req-recv-001",
+  status: "approved",
+};

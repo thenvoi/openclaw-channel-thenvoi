@@ -17,6 +17,10 @@ import {
   mockCreateChatroomResponse,
   mockParticipants,
   mockSendMessageResponse,
+  mockListContactsResponse,
+  mockAddContactResponse,
+  mockListContactRequestsResponse,
+  mockRespondContactRequestResponse,
 } from "../fixtures/payloads.js";
 
 // Mock the channel module
@@ -363,6 +367,253 @@ describe("MCP Tools", () => {
           mentions: [],
         }),
       ).rejects.toThrow("At least one mention is required");
+    });
+  });
+
+  describe("thenvoi_list_contacts", () => {
+    it("should call listContacts with default pagination", async () => {
+      mockRest.listContacts.mockResolvedValue(mockListContactsResponse);
+
+      const result = await executeMcpTool("thenvoi_list_contacts", {});
+
+      expect(mockRest.listContacts).toHaveBeenCalledWith({ page: 1, pageSize: 50 });
+      expect(result).toHaveProperty("contacts");
+      expect(result).toHaveProperty("metadata");
+      const typed = result as { contacts: unknown[]; metadata: unknown };
+      expect(typed.contacts).toHaveLength(2);
+      expect(typed.contacts[0]).toEqual({
+        id: "contact-001",
+        handle: "@jane",
+        name: "Jane Smith",
+        type: "User",
+      });
+    });
+
+    it("should call listContacts with provided pagination", async () => {
+      mockRest.listContacts.mockResolvedValue(mockListContactsResponse);
+
+      await executeMcpTool("thenvoi_list_contacts", { page: 3, page_size: 25 });
+
+      expect(mockRest.listContacts).toHaveBeenCalledWith({ page: 3, pageSize: 25 });
+    });
+
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
+
+      await expect(executeMcpTool("thenvoi_list_contacts", {})).rejects.toThrow(
+        "Thenvoi client not connected",
+      );
+    });
+  });
+
+  describe("thenvoi_add_contact", () => {
+    it("should call addContact with handle", async () => {
+      mockRest.addContact.mockResolvedValue(mockAddContactResponse);
+
+      const result = await executeMcpTool("thenvoi_add_contact", {
+        handle: "@jane",
+      });
+
+      expect(mockRest.addContact).toHaveBeenCalledWith({ handle: "@jane", message: undefined });
+      expect(result).toHaveProperty("success", true);
+      expect(result).toHaveProperty("id", "request-001");
+      expect(result).toHaveProperty("status", "pending");
+    });
+
+    it("should call addContact with handle and message", async () => {
+      mockRest.addContact.mockResolvedValue(mockAddContactResponse);
+
+      await executeMcpTool("thenvoi_add_contact", {
+        handle: "@jane",
+        message: "Let's collaborate!",
+      });
+
+      expect(mockRest.addContact).toHaveBeenCalledWith({
+        handle: "@jane",
+        message: "Let's collaborate!",
+      });
+    });
+
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
+
+      await expect(
+        executeMcpTool("thenvoi_add_contact", { handle: "@jane" }),
+      ).rejects.toThrow("Thenvoi client not connected");
+    });
+  });
+
+  describe("thenvoi_remove_contact", () => {
+    it("should call removeContact with handle", async () => {
+      mockRest.removeContact.mockResolvedValue({ ok: true });
+
+      const result = await executeMcpTool("thenvoi_remove_contact", {
+        handle: "@jane",
+      });
+
+      expect(mockRest.removeContact).toHaveBeenCalledWith({
+        target: "handle",
+        handle: "@jane",
+      });
+      expect(result).toHaveProperty("success", true);
+      expect(result).toHaveProperty("message", "Contact removed");
+    });
+
+    it("should call removeContact with contact_id", async () => {
+      mockRest.removeContact.mockResolvedValue({ ok: true });
+
+      const result = await executeMcpTool("thenvoi_remove_contact", {
+        contact_id: "contact-001",
+      });
+
+      expect(mockRest.removeContact).toHaveBeenCalledWith({
+        target: "contactId",
+        contactId: "contact-001",
+      });
+      expect(result).toHaveProperty("success", true);
+    });
+
+    it("should throw when neither handle nor contact_id provided", async () => {
+      await expect(
+        executeMcpTool("thenvoi_remove_contact", {}),
+      ).rejects.toThrow("Either handle or contact_id is required");
+    });
+
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
+
+      await expect(
+        executeMcpTool("thenvoi_remove_contact", { handle: "@jane" }),
+      ).rejects.toThrow("Thenvoi client not connected");
+    });
+  });
+
+  describe("thenvoi_list_contact_requests", () => {
+    it("should call listContactRequests with default params", async () => {
+      mockRest.listContactRequests.mockResolvedValue(mockListContactRequestsResponse);
+
+      const result = await executeMcpTool("thenvoi_list_contact_requests", {});
+
+      expect(mockRest.listContactRequests).toHaveBeenCalledWith({
+        page: 1,
+        pageSize: 50,
+        sentStatus: "pending",
+      });
+      expect(result).toHaveProperty("received");
+      expect(result).toHaveProperty("sent");
+      expect(result).toHaveProperty("metadata");
+      const typed = result as { received: unknown[]; sent: unknown[] };
+      expect(typed.received).toHaveLength(1);
+      expect(typed.received[0]).toEqual({
+        id: "req-recv-001",
+        from_handle: "@alice",
+        from_name: "Alice",
+        message: "Hi, let's connect!",
+        status: "pending",
+      });
+      expect(typed.sent).toHaveLength(1);
+      expect(typed.sent[0]).toEqual({
+        id: "req-sent-001",
+        to_handle: "@bob",
+        to_name: "Bob",
+        message: "Want to collaborate?",
+        status: "pending",
+      });
+    });
+
+    it("should call listContactRequests with provided params", async () => {
+      mockRest.listContactRequests.mockResolvedValue(mockListContactRequestsResponse);
+
+      await executeMcpTool("thenvoi_list_contact_requests", {
+        page: 2,
+        page_size: 10,
+        sent_status: "approved",
+      });
+
+      expect(mockRest.listContactRequests).toHaveBeenCalledWith({
+        page: 2,
+        pageSize: 10,
+        sentStatus: "approved",
+      });
+    });
+
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
+
+      await expect(
+        executeMcpTool("thenvoi_list_contact_requests", {}),
+      ).rejects.toThrow("Thenvoi client not connected");
+    });
+  });
+
+  describe("thenvoi_respond_contact_request", () => {
+    it("should approve a request by handle", async () => {
+      mockRest.respondContactRequest.mockResolvedValue(mockRespondContactRequestResponse);
+
+      const result = await executeMcpTool("thenvoi_respond_contact_request", {
+        action: "approve",
+        handle: "@alice",
+      });
+
+      expect(mockRest.respondContactRequest).toHaveBeenCalledWith({
+        action: "approve",
+        target: "handle",
+        handle: "@alice",
+      });
+      expect(result).toHaveProperty("success", true);
+      expect(result).toHaveProperty("id", "req-recv-001");
+      expect(result).toHaveProperty("status", "approved");
+    });
+
+    it("should reject a request by request_id", async () => {
+      mockRest.respondContactRequest.mockResolvedValue({ id: "req-recv-001", status: "rejected" });
+
+      const result = await executeMcpTool("thenvoi_respond_contact_request", {
+        action: "reject",
+        request_id: "req-recv-001",
+      });
+
+      expect(mockRest.respondContactRequest).toHaveBeenCalledWith({
+        action: "reject",
+        target: "requestId",
+        requestId: "req-recv-001",
+      });
+      expect(result).toHaveProperty("success", true);
+      expect(result).toHaveProperty("status", "rejected");
+    });
+
+    it("should cancel a sent request by handle", async () => {
+      mockRest.respondContactRequest.mockResolvedValue({ id: "req-sent-001", status: "cancelled" });
+
+      const result = await executeMcpTool("thenvoi_respond_contact_request", {
+        action: "cancel",
+        handle: "@bob",
+      });
+
+      expect(mockRest.respondContactRequest).toHaveBeenCalledWith({
+        action: "cancel",
+        target: "handle",
+        handle: "@bob",
+      });
+      expect(result).toHaveProperty("success", true);
+      expect(result).toHaveProperty("status", "cancelled");
+    });
+
+    it("should throw when neither handle nor request_id provided", async () => {
+      await expect(
+        executeMcpTool("thenvoi_respond_contact_request", { action: "approve" }),
+      ).rejects.toThrow("Either handle or request_id is required");
+    });
+
+    it("should throw when link not connected", async () => {
+      vi.mocked(channel.getLink).mockReturnValue(undefined);
+
+      await expect(
+        executeMcpTool("thenvoi_respond_contact_request", {
+          action: "approve",
+          handle: "@alice",
+        }),
+      ).rejects.toThrow("Thenvoi client not connected");
     });
   });
 });
