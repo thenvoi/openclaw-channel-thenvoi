@@ -106,9 +106,7 @@ const lookupPeersTool: McpTool = {
 
     const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize: page_size, notInChat: "" });
 
-    console.log("[thenvoi] lookupPeers response:", JSON.stringify(response, null, 2));
-
-    const result = {
+    return {
       peers: (response.data ?? []).map((peer) => ({
         id: peer.id,
         handle: peer.handle,
@@ -119,10 +117,6 @@ const lookupPeersTool: McpTool = {
       total: response.metadata?.totalCount ?? 0,
       has_more: (response.metadata?.page ?? 1) < (response.metadata?.totalPages ?? 1),
     };
-
-    console.log("[thenvoi] lookupPeers returning:", JSON.stringify(result, null, 2));
-
-    return result;
   },
 };
 

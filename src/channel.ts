@@ -191,7 +191,17 @@ const presences = getGatewayRegistry().presences;
 
 // Track last sender per thread for auto-mention fallback
 // Key: threadId, Value: { senderId, senderName }
+const MAX_SENDER_CACHE = 500;
 const lastSenderByThread: Map<string, { senderId: string; senderName: string }> = new Map();
+
+function trackSender(threadId: string, senderId: string, senderName: string): void {
+  if (lastSenderByThread.size >= MAX_SENDER_CACHE) {
+    // Evict oldest entry (first key in Map insertion order)
+    const oldest = lastSenderByThread.keys().next().value;
+    if (oldest) lastSenderByThread.delete(oldest);
+  }
+  lastSenderByThread.set(threadId, { senderId, senderName });
+}
 
 // Gateway callback for delivering inbound messages
 let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
@@ -229,10 +239,7 @@ export function setInboundCallback(
 export function deliverMessage(message: OpenClawInboundMessage): void {
   // Track the sender for auto-mention fallback when responding
   if (message.threadId && message.senderId && message.senderName) {
-    lastSenderByThread.set(message.threadId, {
-      senderId: message.senderId,
-      senderName: message.senderName,
-    });
+    trackSender(message.threadId, message.senderId, message.senderName);
   }
 
   if (deliverInbound) {
@@ -417,13 +424,10 @@ export const thenvoiChannel: OpenClawChannel = {
     deliveryMode: "direct",
 
     resolveTarget: (params: { to?: string; allowFrom?: string[]; mode?: string }) => {
-      console.log("[thenvoi] resolveTarget called with:", JSON.stringify(params));
       const target = params.to?.trim() ?? "";
       if (!target) {
-        console.log("[thenvoi] resolveTarget: no target provided");
         return { ok: false, error: new Error("Thenvoi requires a room_id as target") };
       }
-      console.log("[thenvoi] resolveTarget: accepting target:", target);
       return { ok: true, to: target };
     },
 
@@ -579,10 +583,7 @@ export const thenvoiChannel: OpenClawChannel = {
 
         // Track sender for auto-mention fallback
         if (message.threadId && message.senderId && message.senderName) {
-          lastSenderByThread.set(message.threadId, {
-            senderId: message.senderId,
-            senderName: message.senderName,
-          });
+          trackSender(message.threadId, message.senderId, message.senderName);
         }
 
         // Try OpenClaw dispatch first
@@ -714,11 +715,8 @@ export const thenvoiChannel: OpenClawChannel = {
     targetResolver: {
       // UUID pattern for Thenvoi room IDs
       looksLikeId: (raw: string): boolean => {
-        const trimmed = raw.trim();
         const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const isUuid = uuidPattern.test(trimmed);
-        console.log(`[thenvoi] looksLikeId("${trimmed}") = ${isUuid}`);
-        return isUuid;
+        return uuidPattern.test(raw.trim());
       },
       hint: "Provide a Thenvoi room_id (UUID format)",
     },
@@ -733,18 +731,8 @@ export const thenvoiChannel: OpenClawChannel = {
  * Register the Thenvoi channel with OpenClaw.
  */
 export function registerChannel(api: OpenClawChannelApi): void {
-  console.log("[thenvoi] Registering channel with OpenClaw...");
-  console.log("[thenvoi] Channel definition:", JSON.stringify({
-    id: thenvoiChannel.id,
-    meta: thenvoiChannel.meta,
-    capabilities: thenvoiChannel.capabilities,
-    hasGateway: !!thenvoiChannel.gateway,
-    hasOutbound: !!thenvoiChannel.outbound,
-    hasMessaging: !!thenvoiChannel.messaging,
-    hasLooksLikeId: !!thenvoiChannel.messaging?.targetResolver?.looksLikeId,
-  }, null, 2));
   api.registerChannel({ plugin: thenvoiChannel });
-  console.log("[thenvoi] Channel registered successfully");
+  console.log("[thenvoi] Channel registered");
 }
 
 // =============================================================================
