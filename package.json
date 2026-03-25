@@ -29,7 +29,6 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "postinstall": "bash scripts/build-sdk.sh",
     "build": "tsup && cp openclaw.plugin.json dist/",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
@@ -46,7 +45,7 @@
     "demo:logs": "cd demo && docker compose logs -f"
   },
   "dependencies": {
-    "@thenvoi/sdk": "github:thenvoi/thenvoi-sdk-typescript"
+    "@thenvoi/sdk": "^0.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
