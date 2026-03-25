@@ -680,6 +680,15 @@ export const thenvoiChannel: OpenClawChannel = {
       await presence.start();
 
       console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
+
+      // Block until OpenClaw signals shutdown — startAccount must stay
+      // alive for the lifetime of the connection, otherwise OpenClaw
+      // treats the exit as a failure and triggers auto-restart.
+      await new Promise<void>((resolve) => {
+        ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+      });
+
+      console.log(`[thenvoi:${accountId}] Shutdown signal received`);
     },
 
     stopAccount: async (ctx: GatewayContext): Promise<void> => {
