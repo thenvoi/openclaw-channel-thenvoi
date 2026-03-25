@@ -40,7 +40,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "node --env-file=.env node_modules/vitest/vitest.mjs run --config vitest.config.e2e.ts",
     "prepublishOnly": "npm run build",
-    "deploy:demo": "npm run build && cp dist/index.js dist/index.js.map dist/index.d.ts demo/plugins/thenvoi/dist/",
+    "deploy:demo": "npm run build && cp dist/index.js dist/index.js.map dist/index.d.ts dist/chunk-*.js demo/plugins/thenvoi/dist/",
     "demo:restart": "npm run deploy:demo && cd demo && docker compose down && docker compose up -d",
     "demo:logs": "cd demo && docker compose logs -f"
   },
