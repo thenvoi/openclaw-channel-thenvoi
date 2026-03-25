@@ -637,6 +637,80 @@ export interface RespondContactRequestParams {
 }
 
 // =============================================================================
+// Memory Types
+// =============================================================================
+
+export type MemoryScope = "subject" | "organization" | "all";
+export type MemoryVisibility = Exclude<MemoryScope, "all">;
+export type MemorySystem = "sensory" | "working" | "long_term";
+export type MemoryType =
+  | "iconic"
+  | "echoic"
+  | "haptic"
+  | "episodic"
+  | "semantic"
+  | "procedural";
+export type MemorySegment = "user" | "agent" | "tool" | "guideline";
+export type MemoryStatus = "active" | "superseded" | "archived" | "all";
+
+export interface MemoryRecord {
+  id?: string;
+  content?: string;
+  system?: string;
+  type?: string;
+  segment?: string;
+  thought?: string | null;
+  subject_id?: string | null;
+  source_agent_id?: string | null;
+  organization_id?: string | null;
+  scope?: string;
+  status?: string;
+  metadata?: Record<string, unknown> | null;
+  inserted_at?: string | null;
+}
+
+export interface ListMemoriesResponse {
+  memories: MemoryRecord[];
+  metadata: PaginationMetadata;
+}
+
+export interface MemoryOperationResult {
+  id?: string;
+  status?: string;
+  success?: boolean;
+}
+
+export interface ListMemoriesParams {
+  subject_id?: string;
+  scope?: MemoryScope;
+  system?: MemorySystem;
+  type?: MemoryType;
+  segment?: MemorySegment;
+  content_query?: string;
+  page_size?: number;
+  status?: MemoryStatus;
+}
+
+export interface StoreMemoryParams {
+  content: string;
+  system: MemorySystem;
+  type: MemoryType;
+  segment: MemorySegment;
+  thought: string;
+  scope?: MemoryVisibility;
+  subject_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface GetMemoryParams {
+  memory_id: string;
+}
+
+export interface UpdateMemoryStatusParams {
+  memory_id: string;
+}
+
+// =============================================================================
 // Common Types
 // =============================================================================
 

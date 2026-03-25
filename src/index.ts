@@ -1,37 +1,7 @@
-/**
- * OpenClaw Channel Plugin for Thenvoi.
- *
- * This plugin enables OpenClaw agents to connect to the Thenvoi platform,
- * allowing them to:
- *
- * 1. Receive messages from other Thenvoi agents and users
- * 2. Send messages back to Thenvoi chat rooms
- * 3. Use platform tools (lookup peers, manage participants, create rooms)
- * 4. Participate in multiple rooms simultaneously
- *
- * @example
- * ```yaml
- * # openclaw.yaml
- * channels:
- *   thenvoi:
- *     accounts:
- *       default:
- *         enabled: true
- * ```
- *
- * Required environment variables:
- * - THENVOI_API_KEY: API key for authentication
- * - THENVOI_AGENT_ID: Agent identifier on Thenvoi
- *
- * Optional environment variables:
- * - THENVOI_WS_URL: WebSocket endpoint (default: wss://app.thenvoi.com/api/v1/socket)
- * - THENVOI_REST_URL: REST API endpoint (default: https://app.thenvoi.com)
- *
- * @packageDocumentation
- */
+import { defineChannelPluginEntry } from "openclaw/plugin-sdk/core";
 
-import { registerChannel, thenvoiChannel, setInboundCallback, setOpenClawRuntime } from "./channel.js";
-import { getMcpToolSchemas, executeMcpTool } from "./mcp-tools.js";
+import { thenvoiChannel, setInboundCallback, setOpenClawRuntime } from "./channel.js";
+import { getMcpToolRegistrations } from "./mcp-tools.js";
 import { BASE_INSTRUCTIONS } from "./prompts.js";
 
 // =============================================================================
@@ -56,103 +26,72 @@ interface PluginHookBeforeAgentStartResult {
   prependContext?: string;
 }
 
+interface PluginHookBeforePromptBuildEvent {
+  prompt: string;
+  messages: unknown[];
+}
+
+interface PluginHookBeforePromptBuildResult {
+  systemPrompt?: string;
+  prependContext?: string;
+  prependSystemContext?: string;
+}
+
 interface OpenClawPluginApi {
-  registerChannel: (options: { plugin: typeof thenvoiChannel }) => void;
-  registerMcpTools?: (tools: ReturnType<typeof getMcpToolSchemas>) => void;
   // OpenClaw provides a callback setter for inbound message delivery
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onInboundMessage?: (setter: any) => void;
   // Hook registration for lifecycle events
   on?: (
-    hookName: "before_agent_start",
+    hookName: "before_prompt_build" | "before_agent_start",
     handler: (
-      event: PluginHookBeforeAgentStartEvent,
+      event: PluginHookBeforePromptBuildEvent | PluginHookBeforeAgentStartEvent,
       ctx: PluginHookAgentContext
-    ) => PluginHookBeforeAgentStartResult | void
+    ) => PluginHookBeforePromptBuildResult | PluginHookBeforeAgentStartResult | void
   ) => void;
 }
 
-/**
- * OpenClaw plugin entry point.
- *
- * This function is called by OpenClaw when the plugin is loaded.
- * It registers the Thenvoi channel and MCP tools.
- *
- * Connection lifecycle is managed by the channel gateway (startAccount/stopAccount),
- * not by a separate service.
- */
-export default function plugin(api: OpenClawPluginApi): void {
-  // Debug: Log available API methods
-  console.log("[thenvoi] OpenClaw Plugin API keys:", Object.keys(api));
-
-  // Store OpenClaw runtime for message dispatch
+const plugin = defineChannelPluginEntry({
+  id: "openclaw-channel-thenvoi",
+  name: "Thenvoi",
+  description: "Connect OpenClaw to the Thenvoi AI agent collaboration platform",
+  plugin: thenvoiChannel,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const runtime = (api as any).runtime;
-  if (runtime) {
+  setRuntime: (runtime: any) => {
     setOpenClawRuntime(runtime);
-  }
+  },
+  registerFull(api) {
+    const compatApi = api as unknown as OpenClawPluginApi;
+    const registerTool = (compatApi as { registerTool?: (tool: unknown) => void }).registerTool;
 
-  // Register the channel (handles connection via gateway.startAccount/stopAccount)
-  registerChannel(api);
-
-  // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
-  const registerTool = (api as any).registerTool;
-  if (registerTool) {
-    const toolSchemas = getMcpToolSchemas();
-    console.log(`[thenvoi] Registering ${toolSchemas.length} tools:`, toolSchemas.map(t => t.name));
-    for (const tool of toolSchemas) {
-      registerTool({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-        // OpenClaw execute signature: (toolCallId: string, input: object) => AgentToolResult
-        // Result format: { content: [{ type: "text", text: "..." }], details: payload }
-        execute: async (_toolCallId: unknown, input: unknown) => {
-          console.log(`[thenvoi] Executing tool ${tool.name} with input:`, JSON.stringify(input));
-          try {
-            const result = await executeMcpTool(tool.name, input ?? {});
-            const resultStr = JSON.stringify(result, null, 2);
-            console.log(`[thenvoi] Tool ${tool.name} returned:`, resultStr);
-
-            // Return in OpenClaw's expected AgentToolResult format
-            return {
-              content: [{ type: "text", text: resultStr }],
-              details: result,
-            };
-          } catch (error) {
-            console.error(`[thenvoi] Tool ${tool.name} error:`, error);
-            throw error;
-          }
-        },
-      });
+    if (registerTool) {
+      const registrations = getMcpToolRegistrations();
+      for (const tool of registrations) {
+        registerTool({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+          execute: async (_toolCallId: unknown, input: unknown) =>
+            tool.execute((input ?? {}) as Record<string, unknown>),
+        });
+      }
+    } else {
+      console.warn("[thenvoi] WARNING: api.registerTool is not available - tools will NOT be registered!");
     }
-    console.log("[thenvoi] Tools registered successfully");
-  } else {
-    console.warn("[thenvoi] WARNING: api.registerTool is not available - tools will NOT be registered!");
-    console.warn("[thenvoi] Available API methods:", Object.keys(api));
-  }
 
-  // Register before_agent_start hook to inject Thenvoi instructions
-  // Always inject so agent knows how to use Thenvoi tools even when initiating from other channels
-  // The prompt itself contains "When NOT to Use" guidance for non-Thenvoi contexts
-  if (api.on) {
-    api.on("before_agent_start", (_event, ctx) => {
-      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      console.log("[thenvoi] Injecting BASE_INSTRUCTIONS");
-      return {
-        prependContext: BASE_INSTRUCTIONS,
-      };
-    });
-    console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
-  }
+    if (compatApi.on) {
+      compatApi.on("before_prompt_build", (_event, _ctx) => ({
+        prependSystemContext: BASE_INSTRUCTIONS,
+      }));
+    }
 
-  // Set up inbound message delivery - OpenClaw provides a callback for message delivery
-  if (api.onInboundMessage) {
-    api.onInboundMessage(setInboundCallback);
-  }
+    if (compatApi.onInboundMessage) {
+      compatApi.onInboundMessage(setInboundCallback);
+    }
+  },
+});
 
-  console.log("[thenvoi] Plugin loaded, channel registered");
-}
+export default plugin;
 
 // =============================================================================
 // Named Exports
@@ -173,7 +112,13 @@ export { ThenvoiClient } from "./thenvoi-client.js";
 export { RateLimitAwareWebSocket } from "./rate-limit-websocket.js";
 
 // MCP tool exports
-export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";
+export {
+  mcpTools,
+  getMcpTool,
+  getMcpToolRegistrations,
+  getMcpToolSchemas,
+  executeMcpTool,
+} from "./mcp-tools.js";
 
 // Prompt exports
 export {

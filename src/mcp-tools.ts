@@ -1,685 +1,294 @@
 /**
- * MCP Tools for Thenvoi platform operations.
+ * MCP tools exposed by the OpenClaw Thenvoi channel plugin.
  *
- * Exposes Thenvoi platform tools via MCP (Model Context Protocol)
- * for use by OpenClaw agents.
+ * The tool contracts now come from the published SDK MCP builders. We compose:
+ * - single-context registrations for tools that do not require a room
+ * - room-scoped registrations for chat and participant operations
  */
 
-import { getClient, getAgentId } from "./channel.js";
-import type {
-  AddContactParams,
-  AddParticipantParams,
-  CreateChatroomParams,
-  GetParticipantsParams,
-  ListContactRequestsParams,
-  ListContactsParams,
-  LookupPeersParams,
-  RemoveContactParams,
-  RemoveParticipantParams,
-  RespondContactRequestParams,
-  SendEventParams,
-  SendMessageParams,
-} from "./types.js";
+import type { AdapterToolsProtocol } from "@thenvoi/sdk";
+import { buildRoomScopedRegistrations, buildSingleContextRegistrations } from "@thenvoi/sdk/mcp";
+import type { McpToolInputSchema, McpToolRegistration } from "@thenvoi/sdk/mcp";
+import { AgentTools } from "@thenvoi/sdk/runtime";
 
-// =============================================================================
-// MCP Tool Definitions
-// =============================================================================
+import { getClient } from "./channel.js";
+import type { ThenvoiClient } from "./thenvoi-client.js";
 
-export interface McpTool {
-  name: string;
-  description: string;
-  inputSchema: McpInputSchema;
-  handler: (params: unknown) => Promise<unknown>;
-}
+export interface McpTool extends McpToolRegistration {}
 
-interface McpInputSchema {
-  type: "object";
-  properties: Record<string, McpProperty>;
-  required?: string[];
-}
+const ROOM_SCOPED_TOOL_NAMES = new Set<string>([
+  "thenvoi_send_message",
+  "thenvoi_send_event",
+  "thenvoi_add_participant",
+  "thenvoi_remove_participant",
+  "thenvoi_get_participants",
+]);
 
-interface McpProperty {
-  type: string;
-  description: string;
-  default?: unknown;
-  enum?: string[];
-  items?: { type: string };
-}
+const EXPOSED_TOOL_NAMES = new Set<string>([
+  "thenvoi_lookup_peers",
+  "thenvoi_add_participant",
+  "thenvoi_remove_participant",
+  "thenvoi_get_participants",
+  "thenvoi_create_chatroom",
+  "thenvoi_send_event",
+  "thenvoi_send_message",
+  "thenvoi_list_contacts",
+  "thenvoi_add_contact",
+  "thenvoi_remove_contact",
+  "thenvoi_list_contact_requests",
+  "thenvoi_respond_contact_request",
+  "thenvoi_list_memories",
+  "thenvoi_store_memory",
+  "thenvoi_get_memory",
+  "thenvoi_supersede_memory",
+  "thenvoi_archive_memory",
+]);
 
-// =============================================================================
-// Tool: thenvoi_lookup_peers
-// =============================================================================
+let cachedClient: ReturnType<typeof getClient> | undefined;
+let cachedSingleContextTools: AgentTools | undefined;
+const roomScopedTools = new Map<string, AgentTools>();
 
-const lookupPeersTool: McpTool = {
-  name: "thenvoi_lookup_peers",
-  description:
-    "Find available agents and users on the Thenvoi platform. " +
-    "Use this to discover who you can invite to collaborate.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      page: {
-        type: "number",
-        description: "Page number for pagination (default: 1)",
-        default: 1,
-      },
-      page_size: {
-        type: "number",
-        description: "Number of results per page (default: 50, max: 100)",
-        default: 50,
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { page = 1, page_size = 50 } = params as LookupPeersParams;
-    const client = getClient();
+type AgentToolsRestApi = ConstructorParameters<typeof AgentTools>[0]["rest"];
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.lookupPeers(page, page_size);
-
-    console.log("[thenvoi] lookupPeers response:", JSON.stringify(response, null, 2));
-
-    const result = {
-      peers: response.peers.map((peer) => ({
-        id: peer.id,
-        handle: peer.handle,
-        name: peer.name,
-        type: peer.type,
-        description: peer.description,
-      })),
-      total: response.total_count,
-      has_more: response.has_more,
-    };
-
-    console.log("[thenvoi] lookupPeers returning:", JSON.stringify(result, null, 2));
-
-    return result;
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_add_participant
-// =============================================================================
-
-const addParticipantTool: McpTool = {
-  name: "thenvoi_add_participant",
-  description:
-    "Invite an agent or user to join a Thenvoi chat room. " +
-    "Use lookup_peers first to find available participants.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The ID of the room to add the participant to",
-      },
-      handle: {
-        type: "string",
-        description:
-          "Handle of the agent or user to invite (e.g., '@john' or '@john/agent-name'). " +
-          "Can also be a name or UUID.",
-      },
-      role: {
-        type: "string",
-        description: "Role for the participant (default: member)",
-        default: "member",
-        enum: ["owner", "admin", "member"],
-      },
-    },
-    required: ["room_id", "handle"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, handle, role = "member" } = params as AddParticipantParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    // Lookup the peer to validate it exists and get canonical handle
-    const peersResponse = await client.lookupPeers(1, 100);
-    const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
-    const peer = peersResponse.peers.find(
-      (p) =>
-        p.name.toLowerCase() === normalizedHandle ||
-        p.handle?.toLowerCase() === normalizedHandle
-    );
-
-    if (!peer) {
-      throw new Error(
-        `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
-      );
-    }
-
-    const response = await client.addParticipant(room_id, peer.id, role);
-
-    return {
-      success: true,
-      participant: {
-        id: peer.id,
-        name: response.name,
-        type: response.type,
-        role: response.role,
-      },
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_remove_participant
-// =============================================================================
-
-const removeParticipantTool: McpTool = {
-  name: "thenvoi_remove_participant",
-  description: "Remove an agent or user from a Thenvoi chat room.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The ID of the room to remove the participant from",
-      },
-      name: {
-        type: "string",
-        description: "Name of the agent or user to remove",
-      },
-    },
-    required: ["room_id", "name"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, name } = params as RemoveParticipantParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    await client.removeParticipant(room_id, name);
-
-    return {
-      success: true,
-      message: `Removed ${name} from room`,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_get_participants
-// =============================================================================
-
-const getParticipantsTool: McpTool = {
-  name: "thenvoi_get_participants",
-  description: "List all participants in a Thenvoi chat room.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The ID of the room to list participants for",
-      },
-    },
-    required: ["room_id"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id } = params as GetParticipantsParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const participants = await client.getParticipants(room_id);
-
-    return {
-      participants: participants.map((p) => ({
-        name: p.name,
-        type: p.type,
-        role: p.role,
-      })),
-      count: participants.length,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_create_chatroom
-// =============================================================================
-
-const createChatTool: McpTool = {
-  name: "thenvoi_create_chatroom",
-  description:
-    "Create a new Thenvoi chat room for collaboration. " +
-    "Use this when you need a fresh space for a new task or conversation.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      task_id: {
-        type: "string",
-        description: "Optional task ID to associate with the room",
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { task_id } = params as CreateChatroomParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.createChat(task_id);
-
-    return {
-      success: true,
-      room_id: response.id,
-      message: "Chat room created successfully",
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_send_event
-// =============================================================================
-
-const sendEventTool: McpTool = {
-  name: "thenvoi_send_event",
-  description:
-    "Share events with other participants in a Thenvoi chat room. " +
-    "Event types: " +
-    "'thought' - share your reasoning process (shows thinking indicator), " +
-    "'error' - report problems or failures (shows error indicator), " +
-    "'task' - report progress or status updates (shows progress indicator), " +
-    "'tool_call' - report tool invocation (shows tool execution, include metadata with tool_call_id, name, args), " +
-    "'tool_result' - report tool completion (shows tool result, include metadata with tool_call_id, name, output).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The ID of the room to send the event to",
-      },
-      content: {
-        type: "string",
-        description: "Human-readable content of the event",
-      },
-      message_type: {
-        type: "string",
-        description: "Type of event",
-        enum: ["thought", "error", "task", "tool_call", "tool_result"],
-      },
-      metadata: {
-        type: "object",
-        description:
-          "Optional structured metadata. For tool_call: {tool_call_id, name, args}. " +
-          "For tool_result: {tool_call_id, name, output, error?}",
-      },
-    },
-    required: ["room_id", "content", "message_type"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, content, message_type, metadata } = params as SendEventParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    // Send event with optional metadata
-    const response = await client.sendEvent(room_id, content, message_type, metadata);
-
-    return {
-      success: true,
-      event_id: response.id,
-      message_type,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_send_message
-// =============================================================================
-
-const sendMessageTool: McpTool = {
-  name: "thenvoi_send_message",
-  description:
-    "Send a message to a Thenvoi chat room. " +
-    "Messages require at least one @mention. Use this to respond to users or other agents. " +
-    "IMPORTANT: You MUST use this tool to communicate - plain text responses won't reach users.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The ID of the room to send the message to (use the thread_id from the conversation)",
-      },
-      content: {
-        type: "string",
-        description: "The message content to send",
-      },
-      mentions: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "List of participant names to @mention. At least one required. " +
-          "Use thenvoi_get_participants to see available participants.",
-      },
-    },
-    required: ["room_id", "content", "mentions"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, content, mentions } = params as SendMessageParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    if (!mentions || mentions.length === 0) {
-      throw new Error("At least one mention is required to send a message");
-    }
-
-    // Get the current agent's ID to avoid mentioning self
-    const selfAgentId = getAgentId();
-
-    // Get participants to resolve names to IDs
-    const participants = await client.getParticipants(room_id);
-
-    // Resolve mention names to participant objects
-    // When matching by name, exclude self to avoid "cannot mention yourself" error
-    const resolvedMentions = mentions.map((name) => {
-      const participant = participants.find(
-        (p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== selfAgentId
-      );
-      if (!participant) {
-        throw new Error(
-          `Participant "${name}" not found in room (excluding self). Use thenvoi_get_participants to see available participants.`
-        );
-      }
-      return { id: participant.id, name: participant.name };
-    });
-
-    const response = await client.sendMessage(room_id, content, resolvedMentions);
-
-    return {
-      success: true,
-      message_id: response.id,
-      recipients: response.recipients,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_list_contacts
-// =============================================================================
-
-const listContactsTool: McpTool = {
-  name: "thenvoi_list_contacts",
-  description: "List agent's contacts with pagination.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      page: {
-        type: "number",
-        description: "Page number (default: 1)",
-        default: 1,
-      },
-      page_size: {
-        type: "number",
-        description: "Items per page (default: 50, max: 100)",
-        default: 50,
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { page = 1, page_size = 50 } = params as ListContactsParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.listContacts(page, page_size);
-
-    return {
-      contacts: response.contacts.map((c) => ({
-        id: c.id,
-        handle: c.handle,
-        name: c.name,
-        type: c.type,
-      })),
-      metadata: response.metadata,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_add_contact
-// =============================================================================
-
-const addContactTool: McpTool = {
-  name: "thenvoi_add_contact",
-  description:
-    "Send a contact request to add someone as a contact. " +
-    "Returns 'pending' when request is created, 'approved' when auto-accepted " +
-    "(if they already sent you a request).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      handle: {
-        type: "string",
-        description: "Handle of user/agent to add (e.g., '@john' or '@john/agent-name')",
-      },
+function buildAgentToolsRestApi(client: ThenvoiClient): AgentToolsRestApi {
+  return {
+    createChatMessage: async (
+      chatId: string,
       message: {
-        type: "string",
-        description: "Optional message with the request",
+        content: string;
+        mentions?: Array<{ id: string; name: string }>;
       },
+    ) => {
+      const result = await client.sendMessage(chatId, message.content, message.mentions ?? []);
+      return result as unknown as Record<string, unknown>;
     },
-    required: ["handle"],
-  },
-  handler: async (params: unknown) => {
-    const { handle, message } = params as AddContactParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.addContact(handle, message);
-
-    return {
-      success: true,
-      id: response.id,
-      status: response.status,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_remove_contact
-// =============================================================================
-
-const removeContactTool: McpTool = {
-  name: "thenvoi_remove_contact",
-  description: "Remove an existing contact by handle or ID.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      handle: {
-        type: "string",
-        description: "Contact's handle",
+    createChatEvent: async (
+      chatId: string,
+      event: {
+        content: string;
+        messageType: string;
+        metadata?: Record<string, unknown>;
       },
-      contact_id: {
-        type: "string",
-        description: "Or contact record ID (UUID)",
-      },
+    ) => {
+      const result = await client.sendEvent(
+        chatId,
+        event.content,
+        event.messageType as never,
+        event.metadata,
+      );
+      return result as unknown as Record<string, unknown>;
     },
-  },
-  handler: async (params: unknown) => {
-    const { handle, contact_id } = params as RemoveContactParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    if (!handle && !contact_id) {
-      throw new Error("Either handle or contact_id is required");
-    }
-
-    await client.removeContact(handle, contact_id);
-
-    return {
-      success: true,
-      message: "Contact removed",
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_list_contact_requests
-// =============================================================================
-
-const listContactRequestsTool: McpTool = {
-  name: "thenvoi_list_contact_requests",
-  description:
-    "List both received and sent contact requests. " +
-    "Received requests are always filtered to pending status. " +
-    "Sent requests can be filtered by status.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      page: {
-        type: "number",
-        description: "Page number (default: 1)",
-        default: 1,
-      },
-      page_size: {
-        type: "number",
-        description: "Items per page per direction (default: 50, max: 100)",
-        default: 50,
-      },
-      sent_status: {
-        type: "string",
-        description: "Filter sent requests by status (default: pending)",
-        default: "pending",
-        enum: ["pending", "approved", "rejected", "cancelled", "all"],
-      },
+    createChat: async (taskId?: string) => client.createChat(taskId),
+    listChatParticipants: async (chatId: string) => client.getParticipants(chatId),
+    addChatParticipant: async (
+      chatId: string,
+      participant: { participantId: string; role: string },
+    ) => {
+      const result = await client.addParticipant(
+        chatId,
+        participant.participantId,
+        participant.role as never,
+      );
+      return result as unknown as Record<string, unknown>;
     },
-  },
-  handler: async (params: unknown) => {
-    const { page = 1, page_size = 50, sent_status = "pending" } = params as ListContactRequestsParams;
-    const client = getClient();
-
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
-    }
-
-    const response = await client.listContactRequests(page, page_size, sent_status);
-
-    return {
-      received: response.received.map((r) => ({
-        id: r.id,
-        from_handle: r.from_handle,
-        from_name: r.from_name,
-        message: r.message,
-        status: r.status,
-      })),
-      sent: response.sent.map((s) => ({
-        id: s.id,
-        to_handle: s.to_handle,
-        to_name: s.to_name,
-        message: s.message,
-        status: s.status,
-      })),
-      metadata: response.metadata,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_respond_contact_request
-// =============================================================================
-
-const respondContactRequestTool: McpTool = {
-  name: "thenvoi_respond_contact_request",
-  description:
-    "Respond to a contact request. " +
-    "Actions: 'approve'/'reject' for requests you RECEIVED, " +
-    "'cancel' for requests you SENT.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        description: "Action to take",
-        enum: ["approve", "reject", "cancel"],
-      },
-      handle: {
-        type: "string",
-        description: "Other party's handle",
-      },
-      request_id: {
-        type: "string",
-        description: "Or request ID (UUID)",
-      },
+    removeChatParticipant: async (chatId: string, participantId: string) => {
+      await client.removeParticipant(chatId, participantId);
+      return { ok: true };
     },
-    required: ["action"],
-  },
-  handler: async (params: unknown) => {
-    const { action, handle, request_id } = params as RespondContactRequestParams;
-    const client = getClient();
+    listPeers: async (request: { page: number; pageSize: number }) => {
+      const result = await client.lookupPeers(request.page, request.pageSize);
+      return {
+        data: result.peers,
+        metadata: {
+          page: result.page,
+          page_size: result.page_size,
+          total_count: result.total_count,
+          total_pages: result.has_more ? result.page + 1 : result.page,
+        },
+      };
+    },
+    listContacts: async (request: { page?: number; pageSize?: number }) => {
+      const result = await client.listContacts(request.page ?? 1, request.pageSize ?? 50);
+      return {
+        data: result.contacts,
+        metadata: result.metadata,
+      } as unknown as Awaited<ReturnType<NonNullable<AgentToolsRestApi["listContacts"]>>>;
+    },
+    addContact: async (request: { handle: string; message?: string }) => {
+      const result = await client.addContact(request.handle, request.message);
+      return result as unknown as Record<string, unknown>;
+    },
+    removeContact: async (request: { target: "handle" | "contactId"; handle?: string; contactId?: string }) => {
+      const result = await client.removeContact(request.handle, request.contactId);
+      return result as unknown as Record<string, unknown>;
+    },
+    listContactRequests: async (request: {
+      page?: number;
+      pageSize?: number;
+      sentStatus?: "pending" | "approved" | "rejected" | "cancelled" | "all";
+    }) => client.listContactRequests(
+      request.page ?? 1,
+      request.pageSize ?? 50,
+      request.sentStatus ?? "pending",
+    ) as unknown as Awaited<ReturnType<NonNullable<AgentToolsRestApi["listContactRequests"]>>>,
+    respondContactRequest: async (request: {
+      action: "approve" | "reject" | "cancel";
+      target: "handle" | "requestId";
+      handle?: string;
+      requestId?: string;
+    }) => {
+      const result = await client.respondContactRequest(
+        request.action,
+        request.handle,
+        request.requestId,
+      );
+      return result as unknown as Record<string, unknown>;
+    },
+    listMemories: async (request: Record<string, unknown>) => {
+      const result = await client.listMemories(request);
+      return {
+        data: result.memories,
+        metadata: result.metadata,
+      } as unknown as Awaited<ReturnType<NonNullable<AgentToolsRestApi["listMemories"]>>>;
+    },
+    storeMemory: async (request: Parameters<ThenvoiClient["storeMemory"]>[0]) =>
+      client.storeMemory(request),
+    getMemory: async (memoryId: string) => client.getMemory(memoryId),
+    supersedeMemory: async (memoryId: string) => {
+      const result = await client.supersedeMemory(memoryId);
+      return result as unknown as Record<string, unknown>;
+    },
+    archiveMemory: async (memoryId: string) => {
+      const result = await client.archiveMemory(memoryId);
+      return result as unknown as Record<string, unknown>;
+    },
+    getNextMessage: async (request: { chatId: string }) =>
+      client.getNextMessage(request.chatId) as unknown as Awaited<
+        ReturnType<NonNullable<AgentToolsRestApi["getNextMessage"]>>
+      >,
+  };
+}
 
-    if (!client) {
-      throw new Error("Thenvoi client not connected");
+function createSdkAgentTools(roomId: string): AgentTools {
+  const client = getClient();
+
+  if (!client) {
+    throw new Error("Thenvoi client not connected");
+  }
+
+  if (cachedClient !== client) {
+    cachedClient = client;
+    cachedSingleContextTools = undefined;
+    roomScopedTools.clear();
+  }
+
+  if (roomId.length === 0) {
+    if (!cachedSingleContextTools) {
+      cachedSingleContextTools = new AgentTools({
+        roomId,
+        rest: buildAgentToolsRestApi(client),
+      });
     }
 
-    if (!handle && !request_id) {
-      throw new Error("Either handle or request_id is required");
-    }
+    return cachedSingleContextTools;
+  }
 
-    const response = await client.respondContactRequest(action, handle, request_id);
+  const cachedRoomTools = roomScopedTools.get(roomId);
+  if (cachedRoomTools) {
+    return cachedRoomTools;
+  }
 
-    return {
-      success: true,
-      id: response.id,
-      status: response.status,
-    };
-  },
-};
+  const tools = new AgentTools({
+    roomId,
+    rest: buildAgentToolsRestApi(client),
+  });
+  roomScopedTools.set(roomId, tools);
 
-// =============================================================================
-// Export All Tools
-// =============================================================================
+  return tools;
+}
 
-export const mcpTools: McpTool[] = [
-  lookupPeersTool,
-  addParticipantTool,
-  removeParticipantTool,
-  getParticipantsTool,
-  createChatTool,
-  sendEventTool,
-  sendMessageTool,
-  // Contact tools
-  listContactsTool,
-  addContactTool,
-  removeContactTool,
-  listContactRequestsTool,
-  respondContactRequestTool,
-];
+function getSingleContextTools(): AgentTools {
+  return createSdkAgentTools("");
+}
 
-/**
- * Get a tool by name.
- */
+function createSingleContextToolsProxy(): AdapterToolsProtocol {
+  return {
+    capabilities: Object.freeze({
+      peers: true,
+      contacts: true,
+      memory: true,
+    }),
+    sendMessage: async (content, mentions) =>
+      getSingleContextTools().sendMessage(content, mentions),
+    sendEvent: async (content, messageType, metadata) =>
+      getSingleContextTools().sendEvent(content, messageType, metadata),
+    addParticipant: async (name, role) =>
+      getSingleContextTools().addParticipant(name, role),
+    removeParticipant: async (name) => getSingleContextTools().removeParticipant(name),
+    getParticipants: async () => getSingleContextTools().getParticipants(),
+    createChatroom: async (taskId) => getSingleContextTools().createChatroom(taskId),
+    lookupPeers: async (page, pageSize) =>
+      getSingleContextTools().lookupPeers(page, pageSize),
+    listContacts: async (request) => getSingleContextTools().listContacts(request),
+    addContact: async (request) => getSingleContextTools().addContact(request),
+    removeContact: async (request) => getSingleContextTools().removeContact(request),
+    listContactRequests: async (request) =>
+      getSingleContextTools().listContactRequests(request),
+    respondContactRequest: async (request) =>
+      getSingleContextTools().respondContactRequest(request),
+    listMemories: async (request) => getSingleContextTools().listMemories(request),
+    storeMemory: async (request) => getSingleContextTools().storeMemory(request),
+    getMemory: async (memoryId) => getSingleContextTools().getMemory(memoryId),
+    supersedeMemory: async (memoryId) =>
+      getSingleContextTools().supersedeMemory(memoryId),
+    archiveMemory: async (memoryId) => getSingleContextTools().archiveMemory(memoryId),
+    getToolSchemas: (format, options) =>
+      getSingleContextTools().getToolSchemas(format, options),
+    getAnthropicToolSchemas: (options) =>
+      getSingleContextTools().getAnthropicToolSchemas(options),
+    getOpenAIToolSchemas: (options) =>
+      getSingleContextTools().getOpenAIToolSchemas(options),
+    executeToolCall: async (toolName, toolArgs) =>
+      getSingleContextTools().executeToolCall(toolName, toolArgs),
+  };
+}
+
+function filterRegistrations(
+  registrations: McpToolRegistration[],
+  predicate: (toolName: string) => boolean,
+): McpToolRegistration[] {
+  return registrations.filter(
+    (registration) =>
+      EXPOSED_TOOL_NAMES.has(registration.name) && predicate(registration.name),
+  );
+}
+
+function buildMcpTools(): McpTool[] {
+  const roomScoped = filterRegistrations(
+    buildRoomScopedRegistrations((roomId) => createSdkAgentTools(roomId), {
+      enableContactTools: true,
+      enableMemoryTools: true,
+    }),
+    (toolName) => ROOM_SCOPED_TOOL_NAMES.has(toolName),
+  );
+
+  const singleContext = filterRegistrations(
+    buildSingleContextRegistrations(createSingleContextToolsProxy(), {
+      enableContactTools: true,
+      enableMemoryTools: true,
+    }),
+    (toolName) => !ROOM_SCOPED_TOOL_NAMES.has(toolName),
+  );
+
+  return [...singleContext, ...roomScoped];
+}
+
+export const mcpTools: McpTool[] = buildMcpTools();
+
 export function getMcpTool(name: string): McpTool | undefined {
   return mcpTools.find((tool) => tool.name === name);
 }
 
-/**
- * Execute a tool by name.
- */
 export async function executeMcpTool(
   name: string,
   params: unknown,
@@ -690,20 +299,36 @@ export async function executeMcpTool(
     throw new Error(`Unknown tool: ${name}`);
   }
 
-  return tool.handler(params);
+  const result = await tool.execute((params ?? {}) as Record<string, unknown>);
+  if (result.isError) {
+    const message = result.content[0]?.text || `Tool ${name} failed`;
+    throw new Error(message);
+  }
+
+  const text = result.content[0]?.text ?? "";
+  if (text.length === 0) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
-/**
- * Get all tool schemas for registration.
- */
 export function getMcpToolSchemas(): Array<{
   name: string;
   description: string;
-  inputSchema: McpInputSchema;
+  inputSchema: McpToolInputSchema;
 }> {
   return mcpTools.map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
   }));
+}
+
+export function getMcpToolRegistrations(): McpToolRegistration[] {
+  return mcpTools;
 }

@@ -27,7 +27,7 @@ describe("Message Flow Integration", () => {
 
   describe("Send and receive message flow", () => {
     it("should send a message successfully", async () => {
-      mockFetchOnce(fetchMock, { response: { data: mockSendResponse } });
+      mockFetchOnce(fetchMock, { response: { id: "msg-new-001" } });
 
       const result = await client.sendMessage("room-001", "Hello, world!", [
         { id: "user-1", name: "User" },
@@ -41,13 +41,13 @@ describe("Message Flow Integration", () => {
       // First call returns a message
       mockFetchOnce(fetchMock, { response: mockNextMessageResponse });
       // Second call returns no more messages
-      mockFetchOnce(fetchMock, { response: { message: "no_pending_messages" } });
+      mockFetchOnce(fetchMock, { status: 204, response: undefined });
 
-      const message1 = await client.getNextMessage();
+      const message1 = await client.getNextMessage("room-001");
       expect(message1).not.toBeNull();
       expect(message1?.id).toBe("msg-backlog-001");
 
-      const message2 = await client.getNextMessage();
+      const message2 = await client.getNextMessage("room-001");
       expect(message2).toBeNull();
     });
   });
@@ -85,7 +85,7 @@ describe("Message Flow Integration", () => {
     it("should handle multiple concurrent API calls", async () => {
       // Set up responses for all calls
       for (let i = 0; i < 3; i++) {
-        mockFetchOnce(fetchMock, { response: { data: mockSendResponse } });
+        mockFetchOnce(fetchMock, { response: { id: "msg-new-001" } });
       }
 
       const results = await Promise.all([

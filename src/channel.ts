@@ -181,9 +181,6 @@ let openclawRuntime: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function setOpenClawRuntime(runtime: any): void {
   openclawRuntime = runtime;
-  if (runtime?.channel?.reply) {
-    console.log("[thenvoi] OpenClaw dispatch methods available");
-  }
 }
 
 /**
@@ -310,7 +307,6 @@ async function sendReplyToThenvoi(client: ThenvoiClient, roomId: string, payload
     }
 
     await client.sendMessage(roomId, text, mentions);
-    console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
   } catch (error) {
     console.error("[thenvoi] Failed to send reply:", error);
   }
@@ -512,11 +508,8 @@ export const thenvoiChannel: OpenClawChannel = {
     startAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId, account: accountConfig } = ctx;
 
-      console.log(`[thenvoi:${accountId}] Starting gateway...`);
-
       // Disconnect any existing runtime to prevent orphaned connections on reload
       if (runtimes.has(accountId)) {
-        console.log(`[thenvoi:${accountId}] Disconnecting previous runtime before restart...`);
         const existingRuntime = runtimes.get(accountId);
         if (existingRuntime) {
           await existingRuntime.disconnect();
@@ -530,7 +523,6 @@ export const thenvoiChannel: OpenClawChannel = {
       // Create REST client
       const client = new ThenvoiClient(config);
       clients.set(accountId, client);
-      console.log(`[thenvoi:${accountId}] Client registered`);
 
       // Contact event handling — use account config override or default to hub_room
       // so the LLM can review and decide on contact requests
@@ -595,14 +587,12 @@ export const thenvoiChannel: OpenClawChannel = {
                   getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
                 };
 
-                console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
                 const cfg = openclawRuntime.config.loadConfig();
                 await openclawRuntime.channel.reply.dispatchReplyFromConfig({
                   ctx: inboundCtx,
                   cfg,
                   dispatcher,
                 });
-                console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
               } catch (error) {
                 console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
               }
@@ -652,6 +642,15 @@ export const thenvoiChannel: OpenClawChannel = {
       runtimes.set(accountId, runtime);
 
       console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
+
+      await new Promise<void>((resolve) => {
+        if (ctx.abortSignal.aborted) {
+          resolve();
+          return;
+        }
+
+        ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+      });
     },
 
     stopAccount: async (ctx: GatewayContext): Promise<void> => {
@@ -685,9 +684,7 @@ export const thenvoiChannel: OpenClawChannel = {
         const trimmed = raw.trim();
         // Match UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const isUuid = uuidPattern.test(trimmed);
-        console.log(`[thenvoi] looksLikeId("${trimmed}") = ${isUuid}`);
-        return isUuid;
+        return uuidPattern.test(trimmed);
       },
       hint: "Provide a Thenvoi room_id (UUID format)",
     },
@@ -702,18 +699,7 @@ export const thenvoiChannel: OpenClawChannel = {
  * Register the Thenvoi channel with OpenClaw.
  */
 export function registerChannel(api: OpenClawChannelApi): void {
-  console.log("[thenvoi] Registering channel with OpenClaw...");
-  console.log("[thenvoi] Channel definition:", JSON.stringify({
-    id: thenvoiChannel.id,
-    meta: thenvoiChannel.meta,
-    capabilities: thenvoiChannel.capabilities,
-    hasGateway: !!thenvoiChannel.gateway,
-    hasOutbound: !!thenvoiChannel.outbound,
-    hasMessaging: !!thenvoiChannel.messaging,
-    hasLooksLikeId: !!thenvoiChannel.messaging?.targetResolver?.looksLikeId,
-  }, null, 2));
   api.registerChannel({ plugin: thenvoiChannel });
-  console.log("[thenvoi] Channel registered successfully");
 }
 
 // =============================================================================
