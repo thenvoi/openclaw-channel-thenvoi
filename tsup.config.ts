@@ -1,23 +1,15 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "tsup";
 
-// The SDK's optional peer dependencies that should not be bundled
-const SDK_OPTIONAL_EXTERNALS = [
-  "@langchain/langgraph/prebuilt",
-  "@langchain/core/tools",
-  "@a2a-js/sdk",
-  "@a2a-js/sdk/client",
-  "@a2a-js/sdk/server",
-  "@a2a-js/sdk/server/express",
-  "@anthropic-ai/sdk",
-  "@anthropic-ai/claude-agent-sdk",
-  "@google/genai",
-  "@linear/sdk",
-  "@linear/sdk/webhooks",
-  "@openai/codex-sdk",
-  "express",
-  "openai",
-  "parlant-client",
-];
+// Derive optional peer deps from the SDK's package.json so this stays in sync
+// automatically when the SDK adds/removes optional dependencies.
+const sdkPkg = JSON.parse(readFileSync("node_modules/@thenvoi/sdk/package.json", "utf-8"));
+const sdkPeerMeta: Record<string, { optional?: boolean }> = sdkPkg.peerDependenciesMeta ?? {};
+const sdkOptionalPeers = Object.keys(sdkPeerMeta).filter((dep) => sdkPeerMeta[dep].optional);
+
+// Some SDK code uses subpath imports (e.g. "@a2a-js/sdk/client"). Mark the
+// top-level package external and tsup will also treat subpaths as external.
+const SDK_OPTIONAL_EXTERNALS = sdkOptionalPeers;
 
 export default defineConfig({
   entry: ["src/index.ts"],

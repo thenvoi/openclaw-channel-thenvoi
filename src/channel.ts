@@ -281,16 +281,16 @@ type Mention = { id: string; name?: string };
  */
 async function resolveMentions(
   rest: ThenvoiLink["rest"],
+  agentId: string,
   roomId: string,
   text: string,
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
   const participants = await rest.listChatParticipants(roomId);
-  const agent = await rest.getAgentMe();
 
   // 1. Explicit @Name mentions in text
   const mentioned: Mention[] = [];
   for (const p of participants) {
-    if (p.id !== agent.id && text.includes(`@${p.name}`)) {
+    if (p.id !== agentId && text.includes(`@${p.name}`)) {
       mentioned.push({ id: p.id, name: p.name });
     }
   }
@@ -300,7 +300,7 @@ async function resolveMentions(
   const lastSender = lastSenderByThread.get(roomId);
   if (lastSender) {
     const senderParticipant = participants.find(
-      (p) => p.id === lastSender.senderId && p.id !== agent.id
+      (p) => p.id === lastSender.senderId && p.id !== agentId
     );
     if (senderParticipant) {
       return { mentions: [{ id: senderParticipant.id, name: senderParticipant.name }], participants };
@@ -308,7 +308,7 @@ async function resolveMentions(
   }
 
   // 3. Fallback: first other participant
-  const other = participants.find((p) => p.id !== agent.id);
+  const other = participants.find((p) => p.id !== agentId);
   if (other) {
     return { mentions: [{ id: other.id, name: other.name }], participants };
   }
@@ -323,7 +323,7 @@ async function resolveMentions(
 /**
  * Send a reply back to Thenvoi using the SDK's REST API.
  */
-async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], roomId: string, payload: unknown): Promise<void> {
+async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, roomId: string, payload: unknown): Promise<void> {
   const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
   if (!text) {
     console.warn("[thenvoi] No text in reply payload, skipping");
@@ -331,9 +331,9 @@ async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], roomId: string, pay
   }
 
   try {
-    const resolved = await resolveMentions(rest, roomId, text);
+    const resolved = await resolveMentions(rest, agentId, roomId, text);
     if (!resolved) {
-      console.warn("[thenvoi] No participants to mention, skipping reply");
+      console.error("[thenvoi] Reply dropped: no other participants in room to mention (room=%s)", roomId);
       return;
     }
     await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
@@ -444,7 +444,7 @@ export const thenvoiChannel: OpenClawChannel = {
         throw new Error("Thenvoi link not initialized");
       }
 
-      const resolved = await resolveMentions(link.rest, roomId, text);
+      const resolved = await resolveMentions(link.rest, link.agentId, roomId, text);
       if (!resolved) {
         throw new Error("Cannot send message: no other participants to mention");
       }
@@ -473,7 +473,7 @@ export const thenvoiChannel: OpenClawChannel = {
 
       const messageText = mediaUrl ? `${text}\n\n${mediaUrl}` : text;
 
-      const resolved = await resolveMentions(link.rest, roomId, messageText);
+      const resolved = await resolveMentions(link.rest, link.agentId, roomId, messageText);
       if (!resolved) {
         throw new Error("Cannot send message: no other participants to mention");
       }
@@ -612,17 +612,17 @@ export const thenvoiChannel: OpenClawChannel = {
             const dispatcher = {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendToolResult: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, message.threadId, payload);
+                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
                 return true;
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendBlockReply: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, message.threadId, payload);
+                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
                 return true;
               },
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               sendFinalReply: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, message.threadId, payload);
+                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
                 return true;
               },
               waitForIdle: async (): Promise<void> => Promise.resolve(),
