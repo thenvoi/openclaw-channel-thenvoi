@@ -37,8 +37,7 @@ interface OpenClawPluginApi {
   registerChannel: (options: { plugin: typeof thenvoiChannel }) => void;
   registerMcpTools?: (tools: ReturnType<typeof getMcpToolSchemas>) => void;
   // OpenClaw provides a callback setter for inbound message delivery
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onInboundMessage?: (setter: any) => void;
+  onInboundMessage?: (setter: (cb: (message: unknown) => void) => void) => void;
   // Hook registration for lifecycle events
   on?: (
     hookName: "before_agent_start",
@@ -47,6 +46,15 @@ interface OpenClawPluginApi {
       ctx: PluginHookAgentContext
     ) => PluginHookBeforeAgentStartResult | void
   ) => void;
+  // OpenClaw runtime reference for dispatch (not in public API, provided dynamically)
+  runtime?: unknown;
+  // Tool registration (singular, provided dynamically by OpenClaw)
+  registerTool?: (tool: {
+    name: string;
+    description: string;
+    parameters: unknown;
+    execute: (toolCallId: unknown, input: unknown) => Promise<unknown>;
+  }) => void;
 }
 
 /**
@@ -56,19 +64,16 @@ export default function plugin(api: OpenClawPluginApi): void {
   console.log("[thenvoi] OpenClaw Plugin API keys:", Object.keys(api));
 
   // Store OpenClaw runtime for message dispatch
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const runtime = (api as any).runtime;
-  if (runtime) {
-    setOpenClawRuntime(runtime);
+  if (api.runtime) {
+    setOpenClawRuntime(api.runtime);
   }
 
   // Register the channel (handles connection via gateway.startAccount/stopAccount)
   registerChannel(api);
 
   // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registerTool = (api as any).registerTool;
-  if (registerTool) {
+  if (api.registerTool) {
+    const registerTool = api.registerTool;
     const toolSchemas = getMcpToolSchemas();
     console.log(`[thenvoi] Registering ${toolSchemas.length} tools:`, toolSchemas.map(t => t.name));
     for (const tool of toolSchemas) {
@@ -100,13 +105,20 @@ export default function plugin(api: OpenClawPluginApi): void {
     console.warn("[thenvoi] Available API methods:", Object.keys(api));
   }
 
-  // Register before_agent_start hook to inject Thenvoi instructions
+  // Register before_agent_start hook to inject Thenvoi instructions + room context
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
-      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      return {
-        prependContext: BASE_INSTRUCTIONS,
-      };
+      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider}, sessionKey=${ctx.sessionKey})`);
+
+      // Extract room_id from sessionKey (format: "thenvoi:{roomId}")
+      const roomId = ctx.sessionKey?.startsWith("thenvoi:") ? ctx.sessionKey.slice("thenvoi:".length) : undefined;
+
+      let prependContext = BASE_INSTRUCTIONS;
+      if (roomId) {
+        prependContext += `\n\n## Current Thenvoi Room\n\n**Your current room_id is: \`${roomId}\`**\nUse this value for any tool parameter that asks for \`room_id\`. Do NOT use any other UUID.`;
+      }
+
+      return { prependContext };
     });
     console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
   }
@@ -125,10 +137,10 @@ export default function plugin(api: OpenClawPluginApi): void {
 
 // Channel exports
 export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } from "./channel.js";
-export { getLink, getAgentId } from "./channel.js";
+export { getLink, getAgentId, resetGatewayRegistry } from "./channel.js";
 
 // OpenClaw-specific type exports
-export type { ThenvoiAccountConfig, OpenClawInboundMessage, SenderType } from "./channel.js";
+export type { ThenvoiAccountConfig, OpenClawInboundMessage } from "./channel.js";
 
 // MCP tool exports
 export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";

@@ -3,39 +3,46 @@ import { join } from "node:path";
 import type { Plugin } from "esbuild";
 import { defineConfig } from "tsup";
 
-// Derive optional peer deps from the SDK's package.json so this stays in sync
-// automatically when the SDK adds/removes optional dependencies.
-const sdkPkg = JSON.parse(readFileSync("node_modules/@thenvoi/sdk/package.json", "utf-8"));
-const sdkPeerMeta: Record<string, { optional?: boolean }> = sdkPkg.peerDependenciesMeta ?? {};
+/**
+ * Resolve the SDK package.json from the workspace.
+ * In a pnpm workspace, the SDK is linked via node_modules/@thenvoi/sdk.
+ */
+function loadSdkPackageJson(): Record<string, unknown> {
+  try {
+    return JSON.parse(readFileSync("node_modules/@thenvoi/sdk/package.json", "utf-8"));
+  } catch {
+    // Fallback: read directly from the workspace sibling
+    return JSON.parse(readFileSync("../sdk/package.json", "utf-8"));
+  }
+}
+
+const sdkPkg = loadSdkPackageJson();
+const sdkPeerMeta: Record<string, { optional?: boolean }> =
+  (sdkPkg.peerDependenciesMeta as Record<string, { optional?: boolean }>) ?? {};
 const sdkOptionalPeers = Object.keys(sdkPeerMeta).filter((dep) => sdkPeerMeta[dep].optional);
 
 /**
  * Scan the SDK's compiled ESM files to discover which named exports each
- * optional peer dependency needs.  esbuild validates static named imports at
+ * optional peer dependency needs. esbuild validates static named imports at
  * build time, so our stub modules must re-export matching names.
- *
- * This replaces a hardcoded list of export names so the build automatically
- * adapts when the SDK adds, removes, or renames imports from its optional peers.
  */
 function discoverNamedImports(peers: string[]): Map<string, Set<string>> {
   const result = new Map<string, Set<string>>();
-  const sdkDistDir = "node_modules/@thenvoi/sdk/dist";
 
-  // Regex matches multi-line and single-line static ESM imports:
-  //   import { a, b } from "pkg";
-  //   import { a as x, b } from "pkg/sub";
-  // It intentionally does NOT match dynamic `import("pkg")` – those don't need
-  // named exports.
-  // Limitations: won't catch `import * as X`, `export { X } from "pkg"`, or
-  // imports split across >2 lines. Sufficient for typical SDK compiled output.
+  // Try workspace-linked path first, then sibling path
+  let sdkDistDir = "node_modules/@thenvoi/sdk/dist";
+  try {
+    readdirSync(sdkDistDir);
+  } catch {
+    sdkDistDir = "../sdk/dist";
+  }
+
   const importPattern =
     /import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']\s*;?/g;
 
   const peerSet = new Set(peers);
-  // Also match subpath imports like "@linear/sdk/webhooks" → peer "@linear/sdk"
   function matchingPeer(specifier: string): string | undefined {
     if (peerSet.has(specifier)) return specifier;
-    // Check if specifier is a subpath of a peer (e.g. "@linear/sdk/webhooks")
     for (const peer of peers) {
       if (specifier.startsWith(peer + "/")) return specifier;
     }
@@ -58,11 +65,9 @@ function discoverNamedImports(peers: string[]): Map<string, Set<string>> {
       const key = matchingPeer(specifier);
       if (!key) continue;
       const set = result.get(key) ?? new Set<string>();
-      // Parse "a, b as c, d" → extract the local binding names
       for (const part of names.split(",")) {
         const trimmed = part.trim();
         if (!trimmed) continue;
-        // "foo as bar" → we need to export "foo" (the original name)
         const asMatch = trimmed.match(/^(\S+)\s+as\s+/);
         set.add(asMatch ? asMatch[1] : trimmed);
       }
@@ -74,6 +79,13 @@ function discoverNamedImports(peers: string[]): Map<string, Set<string>> {
 }
 
 const namedImportsPerPeer = discoverNamedImports(sdkOptionalPeers);
+
+if (sdkOptionalPeers.length > 0 && namedImportsPerPeer.size === 0) {
+  throw new Error(
+    `[tsup] Found ${sdkOptionalPeers.length} optional peers but discovered zero named imports. ` +
+    "The SDK must be built before building OpenClaw. Run: pnpm --filter @thenvoi/sdk build",
+  );
+}
 
 /**
  * esbuild plugin that replaces SDK optional peer dep imports with empty modules.
@@ -87,7 +99,6 @@ function stubOptionalPeers(peers: string[]): Plugin {
   return {
     name: "stub-optional-peers",
     setup(build) {
-      // Match the package name or any subpath (e.g. "@langchain/core/tools")
       const filter = new RegExp(
         "^(" + peers.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")(/.*)?$"
       );
@@ -96,7 +107,6 @@ function stubOptionalPeers(peers: string[]): Plugin {
         namespace: "stub-optional-peer",
       }));
       build.onLoad({ filter: /.*/, namespace: "stub-optional-peer" }, (args) => {
-        // Generate named exports for any static imports esbuild will validate.
         const names = namedImportsPerPeer.get(args.path);
         if (names && names.size > 0) {
           const stubs = [...names]
@@ -110,17 +120,24 @@ function stubOptionalPeers(peers: string[]): Plugin {
   };
 }
 
+// Read the package version to inject at build time (replaces __OPENCLAW_PKG_VERSION__ in channel.ts)
+const openclawPkg = JSON.parse(readFileSync("package.json", "utf-8")) as { version: string };
+
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
   dts: true,
   sourcemap: true,
   clean: true,
+  shims: true,
   target: "node22",
   outDir: "dist",
   // Keep openclaw external (host provides it)
   external: ["openclaw"],
   // Bundle the SDK and its dependencies into the plugin
-  noExternal: ["phoenix", "@thenvoi/sdk", "@thenvoi/rest-client", "zod", "zod-to-json-schema"],
+  noExternal: ["phoenix", "@thenvoi/sdk", "@thenvoi/rest-client", "zod", "zod-to-json-schema", "ws", "js-yaml"],
   esbuildPlugins: [stubOptionalPeers(sdkOptionalPeers)],
+  define: {
+    __OPENCLAW_PKG_VERSION__: JSON.stringify(openclawPkg.version),
+  },
 });

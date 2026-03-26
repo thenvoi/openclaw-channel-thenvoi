@@ -25,8 +25,8 @@ export function getE2EConfig(): E2EConfig {
   const agentId = process.env.THENVOI_AGENT_ID;
   const userId = process.env.THENVOI_API_KEY_USER;
   const wsUrl =
-    process.env.THENVOI_WS_URL ?? "wss://api.thenvoi.com/socket/websocket";
-  const restUrl = process.env.THENVOI_REST_URL ?? "https://api.thenvoi.com";
+    process.env.THENVOI_WS_URL ?? "wss://app.thenvoi.com/api/v1/socket";
+  const restUrl = process.env.THENVOI_REST_URL ?? "https://app.thenvoi.com";
 
   if (!apiKey) {
     throw new Error(

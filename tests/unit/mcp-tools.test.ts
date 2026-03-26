@@ -142,6 +142,22 @@ describe("MCP Tools", () => {
       expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 2, pageSize: 25, notInChat: "" });
     });
 
+    it("should clamp invalid pagination to valid ranges", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
+
+      await executeMcpTool("thenvoi_lookup_peers", { page: -1, page_size: 200 });
+
+      expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 1, pageSize: 100, notInChat: "" });
+    });
+
+    it("should clamp page zero to 1", async () => {
+      mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
+
+      await executeMcpTool("thenvoi_lookup_peers", { page: 0, page_size: 50 });
+
+      expect(mockRest.listPeers).toHaveBeenCalledWith({ page: 1, pageSize: 50, notInChat: "" });
+    });
+
     it("should throw when link not connected", async () => {
       vi.mocked(channel.getLink).mockReturnValue(undefined);
 
@@ -193,6 +209,52 @@ describe("MCP Tools", () => {
       );
     });
 
+    it("should paginate through peers to find a match on page 2", async () => {
+      const page1Response = {
+        data: [{ id: "agent-a", name: "Agent A", type: "Agent", handle: "@agent-a" }],
+        metadata: { page: 1, pageSize: 100, totalCount: 2, totalPages: 2 },
+      };
+      const page2Response = {
+        data: [{ id: "agent-b", name: "Agent B", type: "Agent", handle: "@agent-b" }],
+        metadata: { page: 2, pageSize: 100, totalCount: 2, totalPages: 2 },
+      };
+      mockRest.listPeers
+        .mockResolvedValueOnce(page1Response)
+        .mockResolvedValueOnce(page2Response);
+      mockRest.addChatParticipant.mockResolvedValue(mockAddParticipantResponse);
+
+      const result = await executeMcpTool("thenvoi_add_participant", {
+        room_id: "room-001",
+        handle: "Agent B",
+      });
+
+      expect(mockRest.listPeers).toHaveBeenCalledTimes(2);
+      expect(mockRest.addChatParticipant).toHaveBeenCalledWith(
+        "room-001",
+        { participantId: "agent-b", role: "member" },
+      );
+      expect(result).toHaveProperty("success", true);
+    });
+
+    it("should stop paginating after max pages (10) to prevent runaway calls", async () => {
+      // Return pages with no match, claiming 20 total pages
+      const noMatchPage = {
+        data: [{ id: "agent-other", name: "Other Agent", type: "Agent", handle: "@other" }],
+        metadata: { page: 1, pageSize: 100, totalCount: 2000, totalPages: 20 },
+      };
+      mockRest.listPeers.mockResolvedValue(noMatchPage);
+
+      await expect(
+        executeMcpTool("thenvoi_add_participant", {
+          room_id: "room-001",
+          handle: "Nonexistent User",
+        }),
+      ).rejects.toThrow('Peer not found: "Nonexistent User"');
+
+      // Should have stopped at 10 pages, not 20
+      expect(mockRest.listPeers).toHaveBeenCalledTimes(10);
+    });
+
     it("should throw when peer not found", async () => {
       mockRest.listPeers.mockResolvedValue(mockLookupPeersResponse);
 
@@ -217,34 +279,76 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_remove_participant", () => {
-    it("should call removeChatParticipant", async () => {
+    it("should resolve name to ID and call removeChatParticipant", async () => {
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
       mockRest.removeChatParticipant.mockResolvedValue({ ok: true });
 
       const result = await executeMcpTool("thenvoi_remove_participant", {
         room_id: "room-001",
-        name: "Weather Agent",
+        name: "John Doe",
       });
 
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001");
       expect(mockRest.removeChatParticipant).toHaveBeenCalledWith(
         "room-001",
-        "Weather Agent",
+        "user-789",
       );
       expect(result).toHaveProperty("success", true);
       expect(result).toHaveProperty("message");
     });
+
+    it("should use participant_id directly when provided", async () => {
+      mockRest.removeChatParticipant.mockResolvedValue({ ok: true });
+
+      const result = await executeMcpTool("thenvoi_remove_participant", {
+        room_id: "room-001",
+        participant_id: "user-789",
+      });
+
+      expect(mockRest.listChatParticipants).not.toHaveBeenCalled();
+      expect(mockRest.removeChatParticipant).toHaveBeenCalledWith(
+        "room-001",
+        "user-789",
+      );
+      expect(result).toHaveProperty("success", true);
+    });
+
+    it("should throw when participant name not found in room", async () => {
+      mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
+
+      await expect(
+        executeMcpTool("thenvoi_remove_participant", {
+          room_id: "room-001",
+          name: "Unknown Person",
+        }),
+      ).rejects.toThrow('Participant "Unknown Person" not found in room');
+    });
+
+    it("should throw when neither name nor participant_id provided", async () => {
+      await expect(
+        executeMcpTool("thenvoi_remove_participant", {
+          room_id: "room-001",
+        }),
+      ).rejects.toThrow("Either name or participant_id is required");
+    });
   });
 
   describe("thenvoi_get_participants", () => {
-    it("should return participants list", async () => {
+    it("should return participants list with IDs", async () => {
       mockRest.listChatParticipants.mockResolvedValue(mockParticipants);
 
       const result = (await executeMcpTool("thenvoi_get_participants", {
         room_id: "room-001",
-      })) as { participants: unknown[]; count: number };
+      })) as { participants: Array<{ id: string; name: string; type: string }>; count: number };
 
       expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001");
       expect(result).toHaveProperty("participants");
       expect(result).toHaveProperty("count", mockParticipants.length);
+      expect(result.participants[0]).toEqual({
+        id: "user-789",
+        name: "John Doe",
+        type: "User",
+      });
     });
   });
 
@@ -397,6 +501,14 @@ describe("MCP Tools", () => {
       expect(mockRest.listContacts).toHaveBeenCalledWith({ page: 3, pageSize: 25 });
     });
 
+    it("should clamp invalid pagination to valid ranges", async () => {
+      mockRest.listContacts.mockResolvedValue(mockListContactsResponse);
+
+      await executeMcpTool("thenvoi_list_contacts", { page: 0, page_size: 999 });
+
+      expect(mockRest.listContacts).toHaveBeenCalledWith({ page: 1, pageSize: 100 });
+    });
+
     it("should throw when link not connected", async () => {
       vi.mocked(channel.getLink).mockReturnValue(undefined);
 
@@ -534,6 +646,21 @@ describe("MCP Tools", () => {
         page: 2,
         pageSize: 10,
         sentStatus: "approved",
+      });
+    });
+
+    it("should clamp invalid pagination to valid ranges", async () => {
+      mockRest.listContactRequests.mockResolvedValue(mockListContactRequestsResponse);
+
+      await executeMcpTool("thenvoi_list_contact_requests", {
+        page: -5,
+        page_size: 150,
+      });
+
+      expect(mockRest.listContactRequests).toHaveBeenCalledWith({
+        page: 1,
+        pageSize: 100,
+        sentStatus: "pending",
       });
     });
 

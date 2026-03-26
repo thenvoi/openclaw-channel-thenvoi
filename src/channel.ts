@@ -24,13 +24,11 @@ export interface ThenvoiAccountConfig {
   contactConfig?: ContactEventConfig;
 }
 
-export type SenderType = "User" | "Agent" | "System";
-
 export interface OpenClawInboundMessage {
   channelId: "thenvoi";
   threadId: string;
   senderId: string;
-  senderType: SenderType;
+  senderType: string;
   senderName: string;
   text: string;
   timestamp: string;
@@ -159,6 +157,25 @@ interface PluginConfig {
 }
 
 // =============================================================================
+// Minimal type for the OpenClaw runtime methods we access
+// =============================================================================
+
+interface OpenClawRuntimeRef {
+  channel?: {
+    reply?: {
+      dispatchReplyFromConfig?: (args: {
+        ctx: Record<string, unknown>;
+        cfg: unknown;
+        dispatcher: Record<string, unknown>;
+      }) => Promise<void>;
+    };
+  };
+  config?: {
+    loadConfig: () => unknown;
+  };
+}
+
+// =============================================================================
 // Virtual thread ID for contact events (dispatched to LLM for evaluation)
 // =============================================================================
 
@@ -168,12 +185,39 @@ const CONTACTS_THREAD_ID = "__thenvoi_contacts__";
 // Channel State
 // =============================================================================
 
-// Global registry to track gateway connections across module reloads
-// This survives Jiti reloading the module
-const GATEWAY_REGISTRY_KEY = "__thenvoi_gateway_registry__";
+// Global registry to track gateway state across module reloads.
+// All mutable state lives here so it survives Jiti reloading the module.
+// The key is versioned so that two different package versions loaded in
+// the same process do not silently share (and corrupt) each other's state.
+//
+// __OPENCLAW_PKG_VERSION__ is replaced at build time by tsup (see tsup.config.ts `define`).
+// At dev/test time it falls back to reading package.json so the version is
+// never hardcoded in source.
+declare const __OPENCLAW_PKG_VERSION__: string;
+function resolvePackageVersion(): string {
+  if (typeof __OPENCLAW_PKG_VERSION__ !== "undefined") return __OPENCLAW_PKG_VERSION__;
+  try {
+    // Dev / test fallback: read from package.json via Node's fs
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fileURLToPath } = require("node:url") as typeof import("node:url");
+    const pkgPath = new URL("../package.json", import.meta.url);
+    const pkg = JSON.parse(readFileSync(fileURLToPath(pkgPath), "utf-8")) as { version: string };
+    return pkg.version;
+  } catch {
+    return "0.0.0-dev";
+  }
+}
+const PKG_VERSION: string = resolvePackageVersion();
+const GATEWAY_REGISTRY_KEY = `__thenvoi_gateway_registry_v${PKG_VERSION}__`;
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;
   presences: Map<string, RoomPresence>;
+  startingAccounts: Set<string>;
+  lastSenderByThread: Map<string, { senderId: string; senderName: string }>;
+  deliverInbound: ((message: OpenClawInboundMessage) => void) | null;
+  openclawRuntime: OpenClawRuntimeRef | null;
 }
 
 function getGatewayRegistry(): GatewayRegistry {
@@ -182,65 +226,87 @@ function getGatewayRegistry(): GatewayRegistry {
     g[GATEWAY_REGISTRY_KEY] = {
       links: new Map(),
       presences: new Map(),
+      startingAccounts: new Set(),
+      lastSenderByThread: new Map(),
+      deliverInbound: null,
+      openclawRuntime: null,
     };
   }
   return g[GATEWAY_REGISTRY_KEY];
 }
 
-// Active connections per account (use global registry)
-const links = getGatewayRegistry().links;
-const presences = getGatewayRegistry().presences;
+/**
+ * Reset the gateway registry to its initial state.
+ * Intended for test isolation — call in beforeEach/afterEach to prevent state leaking between tests.
+ */
+export function resetGatewayRegistry(): void {
+  const g = globalThis as unknown as Record<string, GatewayRegistry>;
+  delete g[GATEWAY_REGISTRY_KEY];
+}
+
+// Convenience accessors that always read from the current registry.
+// These MUST be functions (not module-level consts) so that
+// resetGatewayRegistry() properly invalidates cached state.
+function registry() { return getGatewayRegistry(); }
+function links() { return getGatewayRegistry().links; }
+function presences() { return getGatewayRegistry().presences; }
 
 // Track last sender per thread for auto-mention fallback
 // Key: threadId, Value: { senderId, senderName }
 const MAX_SENDER_CACHE = 500;
-const lastSenderByThread: Map<string, { senderId: string; senderName: string }> = new Map();
 
-function trackSender(threadId: string, senderId: string, senderName: string): void {
+function trackSender(accountId: string, threadId: string, senderId: string, senderName: string): void {
+  const lastSenderByThread = registry().lastSenderByThread;
+  const cacheKey = `${accountId}:${threadId}`;
+  // Delete-and-reinsert to move the entry to the end (LRU eviction order)
+  lastSenderByThread.delete(cacheKey);
   if (lastSenderByThread.size >= MAX_SENDER_CACHE) {
-    // Evict oldest entry (first key in Map insertion order)
+    // Evict least-recently-used entry (first key in Map insertion order)
     const oldest = lastSenderByThread.keys().next().value;
     if (oldest) lastSenderByThread.delete(oldest);
   }
-  lastSenderByThread.set(threadId, { senderId, senderName });
+  lastSenderByThread.set(cacheKey, { senderId, senderName });
 }
 
-// =============================================================================
-// Participant Cache (avoid per-message API calls in resolveMentions)
-// =============================================================================
+/**
+ * Check if a value has the shape of an OpenClawRuntimeRef.
+ */
+function isOpenClawRuntimeRef(value: unknown): value is OpenClawRuntimeRef {
+  if (value == null || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
 
-const PARTICIPANT_CACHE_TTL_MS = 5_000; // 5 seconds
+  const hasLoadConfig =
+    obj.config != null &&
+    typeof obj.config === "object" &&
+    typeof (obj.config as Record<string, unknown>).loadConfig === "function";
 
-const participantCache = new Map<string, { data: Array<{ id: string; name: string; type?: string }>; ts: number }>();
+  const hasDispatch =
+    obj.channel != null &&
+    typeof obj.channel === "object" &&
+    (obj.channel as Record<string, unknown>).reply != null &&
+    typeof (obj.channel as Record<string, unknown>).reply === "object" &&
+    typeof ((obj.channel as Record<string, unknown>).reply as Record<string, unknown>).dispatchReplyFromConfig === "function";
 
-async function getCachedParticipants(
-  rest: ThenvoiLink["rest"],
-  roomId: string,
-): Promise<Array<{ id: string; name: string; type?: string }>> {
-  const entry = participantCache.get(roomId);
-  if (entry && Date.now() - entry.ts < PARTICIPANT_CACHE_TTL_MS) {
-    return entry.data;
+  if (hasLoadConfig || hasDispatch) {
+    if (hasLoadConfig && !hasDispatch) {
+      console.warn("[thenvoi] Runtime has config.loadConfig but missing channel.reply.dispatchReplyFromConfig — message dispatch will fall back to deliverMessage");
+    }
+    return true;
   }
-  const data = await rest.listChatParticipants(roomId);
-  participantCache.set(roomId, { data, ts: Date.now() });
-  return data;
+  return false;
 }
-
-// Gateway callback for delivering inbound messages
-let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
-
-// OpenClaw runtime reference for message dispatch
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let openclawRuntime: any = null;
 
 /**
  * Set the OpenClaw runtime reference for message dispatch.
  * Called by the plugin entry point.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function setOpenClawRuntime(runtime: any): void {
-  openclawRuntime = runtime;
-  if (runtime?.channel?.reply) {
+export function setOpenClawRuntime(runtime: unknown): void {
+  if (!isOpenClawRuntimeRef(runtime)) {
+    console.warn("[thenvoi] setOpenClawRuntime called with invalid runtime object, ignoring");
+    return;
+  }
+  registry().openclawRuntime = runtime;
+  if (runtime.channel?.reply) {
     console.log("[thenvoi] OpenClaw dispatch methods available");
   }
 }
@@ -252,21 +318,22 @@ export function setOpenClawRuntime(runtime: any): void {
 export function setInboundCallback(
   callback: (message: OpenClawInboundMessage) => void,
 ): void {
-  deliverInbound = callback;
+  registry().deliverInbound = callback;
 }
 
 /**
  * Deliver an inbound message to OpenClaw.
  * Used by the service and runtime to send received messages to OpenClaw.
  */
-export function deliverMessage(message: OpenClawInboundMessage): void {
+export function deliverMessage(message: OpenClawInboundMessage, accountId: string = "default"): void {
   // Track the sender for auto-mention fallback when responding
   if (message.threadId && message.senderId && message.senderName) {
-    trackSender(message.threadId, message.senderId, message.senderName);
+    trackSender(accountId, message.threadId, message.senderId, message.senderName);
   }
 
-  if (deliverInbound) {
-    deliverInbound(message);
+  const deliver = registry().deliverInbound;
+  if (deliver) {
+    deliver(message);
   } else {
     console.warn("[thenvoi] Cannot deliver message: no inbound callback set");
   }
@@ -305,22 +372,24 @@ type Mention = { id: string; name?: string };
 async function resolveMentions(
   rest: ThenvoiLink["rest"],
   agentId: string,
+  accountId: string,
   roomId: string,
   text: string,
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
-  const participants = await getCachedParticipants(rest, roomId);
+  const participants = await rest.listChatParticipants(roomId);
 
-  // 1. Explicit @Name mentions in text
+  // 1. Explicit @Name mentions in text (case-insensitive)
   const mentioned: Mention[] = [];
+  const textLower = text.toLowerCase();
   for (const p of participants) {
-    if (p.id !== agentId && text.includes(`@${p.name}`)) {
+    if (p.id !== agentId && textLower.includes(`@${p.name.toLowerCase()}`)) {
       mentioned.push({ id: p.id, name: p.name });
     }
   }
   if (mentioned.length > 0) return { mentions: mentioned, participants };
 
   // 2. Fallback: last sender in this thread
-  const lastSender = lastSenderByThread.get(roomId);
+  const lastSender = registry().lastSenderByThread.get(`${accountId}:${roomId}`);
   if (lastSender) {
     const senderParticipant = participants.find(
       (p) => p.id === lastSender.senderId && p.id !== agentId
@@ -345,25 +414,22 @@ async function resolveMentions(
 
 /**
  * Send a reply back to Thenvoi using the SDK's REST API.
+ * Throws on failure so callers (e.g. the dispatcher) can track and surface delivery errors.
  */
-async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, roomId: string, payload: unknown): Promise<void> {
+async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, accountId: string, roomId: string, payload: unknown): Promise<void> {
   const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
   if (!text) {
-    console.warn("[thenvoi] No text in reply payload, skipping");
-    return;
+    throw new Error(`[thenvoi] No text in reply payload (room=${roomId})`);
   }
 
-  try {
-    const resolved = await resolveMentions(rest, agentId, roomId, text);
-    if (!resolved) {
-      console.error("[thenvoi] Reply dropped: no other participants in room to mention (room=%s)", roomId);
-      return;
-    }
-    await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
-    console.log(`[thenvoi] Reply sent: ${text.substring(0, 50)}...`);
-  } catch (error) {
-    console.error("[thenvoi] Failed to send reply:", error);
+  const resolved = await resolveMentions(rest, agentId, accountId, roomId, text);
+  if (!resolved) {
+    throw new Error(
+      `[thenvoi] Reply dropped: no other participants in room to mention (room=${roomId}, text=${text.substring(0, 80)})`,
+    );
   }
+  await rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
+  console.log(`[thenvoi] Reply sent: ${text.length > 50 ? text.substring(0, 50) + "..." : text}`);
 }
 
 // =============================================================================
@@ -380,13 +446,16 @@ function platformEventToInboundMessage(event: PlatformEvent): OpenClawInboundMes
   if (!roomId) return null;
 
   // Only process text messages, not events
-  if (payload.message_type !== "text") return null;
+  if (payload.message_type !== "text") {
+    console.log(`[thenvoi] Skipping non-text message (type=${payload.message_type}, room=${roomId})`);
+    return null;
+  }
 
   return {
     channelId: "thenvoi",
     threadId: roomId,
     senderId: payload.sender_id,
-    senderType: payload.sender_type as SenderType,
+    senderType: payload.sender_type,
     senderName: payload.sender_name ?? "Unknown",
     text: payload.content,
     timestamp: payload.inserted_at,
@@ -395,6 +464,40 @@ function platformEventToInboundMessage(event: PlatformEvent): OpenClawInboundMes
       messageType: payload.message_type,
       mentions: payload.metadata?.mentions,
     },
+  };
+}
+
+// =============================================================================
+// Outbound Send Helper
+// =============================================================================
+
+/**
+ * Shared logic for sending an outbound message (text or media) to Thenvoi.
+ */
+async function sendOutbound(ctx: OutboundContext): Promise<OutboundDeliveryResult> {
+  const { text, to, accountId } = ctx;
+  const roomId = to;
+
+  if (!roomId) {
+    throw new Error("room_id is required");
+  }
+
+  const link = links().get(accountId ?? "default");
+  if (!link) {
+    throw new Error("Thenvoi link not initialized");
+  }
+
+  const resolved = await resolveMentions(link.rest, link.agentId, accountId ?? "default", roomId, text);
+  if (!resolved) {
+    throw new Error("Cannot send message: no other participants to mention");
+  }
+
+  const result = await link.rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
+
+  return {
+    channel: "thenvoi",
+    messageId: String(result.id ?? `thenvoi-${Date.now()}`),
+    roomId,
   };
 }
 
@@ -454,60 +557,13 @@ export const thenvoiChannel: OpenClawChannel = {
       return { ok: true, to: target };
     },
 
-    sendText: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
-      const { text, to, accountId } = ctx;
-      const roomId = to;
-
-      if (!roomId) {
-        throw new Error("room_id is required");
-      }
-
-      const link = links.get(accountId ?? "default");
-      if (!link) {
-        throw new Error("Thenvoi link not initialized");
-      }
-
-      const resolved = await resolveMentions(link.rest, link.agentId, roomId, text);
-      if (!resolved) {
-        throw new Error("Cannot send message: no other participants to mention");
-      }
-
-      const result = await link.rest.createChatMessage(roomId, { content: text, mentions: resolved.mentions });
-
-      return {
-        channel: "thenvoi",
-        messageId: String(result.id ?? `thenvoi-${Date.now()}`),
-        roomId,
-      };
+    sendText: (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
+      return sendOutbound(ctx);
     },
 
-    sendMedia: async (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
-      const { text, to, mediaUrl, accountId } = ctx;
-      const roomId = to;
-
-      if (!roomId) {
-        throw new Error("room_id is required");
-      }
-
-      const link = links.get(accountId ?? "default");
-      if (!link) {
-        throw new Error("Thenvoi link not initialized");
-      }
-
-      const messageText = mediaUrl ? `${text}\n\n${mediaUrl}` : text;
-
-      const resolved = await resolveMentions(link.rest, link.agentId, roomId, messageText);
-      if (!resolved) {
-        throw new Error("Cannot send message: no other participants to mention");
-      }
-
-      const result = await link.rest.createChatMessage(roomId, { content: messageText, mentions: resolved.mentions });
-
-      return {
-        channel: "thenvoi",
-        messageId: String(result.id ?? `thenvoi-${Date.now()}`),
-        roomId,
-      };
+    sendMedia: (ctx: OutboundContext): Promise<OutboundDeliveryResult> => {
+      const messageText = ctx.mediaUrl ? `${ctx.text}\n\n${ctx.mediaUrl}` : ctx.text;
+      return sendOutbound({ ...ctx, text: messageText });
     },
   },
 
@@ -544,191 +600,237 @@ export const thenvoiChannel: OpenClawChannel = {
     startAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId, account: accountConfig } = ctx;
 
-      console.log(`[thenvoi:${accountId}] Starting gateway...`);
-
-      // Disconnect any existing connection to prevent orphaned connections on reload
-      if (links.has(accountId)) {
-        console.log(`[thenvoi:${accountId}] Disconnecting previous connection before restart...`);
-        const existingPresence = presences.get(accountId);
-        if (existingPresence) {
-          await existingPresence.stop();
-          presences.delete(accountId);
-        }
-        const existingLink = links.get(accountId);
-        if (existingLink) {
-          await existingLink.disconnect();
-        }
-        links.delete(accountId);
+      // Prevent concurrent startAccount calls for the same account
+      if (registry().startingAccounts.has(accountId)) {
+        console.warn(`[thenvoi:${accountId}] startAccount already in progress, skipping`);
+        return;
       }
+      registry().startingAccounts.add(accountId);
 
-      const config = resolveConfig(accountConfig);
+      try {
+        console.log(`[thenvoi:${accountId}] Starting gateway...`);
 
-      // Create ThenvoiLink (combines WebSocket + REST)
-      const link = new ThenvoiLink({
-        agentId: config.agentId,
-        apiKey: config.apiKey,
-        wsUrl: config.wsUrl,
-        restUrl: config.restUrl,
-      });
-      links.set(accountId, link);
-      console.log(`[thenvoi:${accountId}] Link created`);
-
-      // Connect WebSocket
-      await link.connect();
-      console.log(`[thenvoi:${accountId}] WebSocket connected`);
-
-      // Create RoomPresence for automatic room subscription management
-      const presence = new RoomPresence({
-        link,
-        autoSubscribeExistingRooms: true,
-      });
-
-      // Set up room event handlers
-      presence.onRoomJoined = async (roomId: string, payload: Record<string, unknown>) => {
-        const title = (payload.title as string) ?? roomId;
-        console.log(`[thenvoi:${accountId}] Joined room: ${title} (${roomId})`);
-      };
-
-      presence.onRoomLeft = async (roomId: string) => {
-        console.log(`[thenvoi:${accountId}] Left room: ${roomId}`);
-      };
-
-      // Handle room events (messages, participant changes)
-      presence.onRoomEvent = async (_roomId: string, event: PlatformEvent) => {
-        // Only process message_created events
-        if (event.type !== "message_created") return;
-
-        // Skip messages from our own agent
-        if (event.payload.sender_id === config.agentId) return;
-
-        const message = platformEventToInboundMessage(event);
-        if (!message) return;
-
-        // Try OpenClaw dispatch first
-        if (openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
-          try {
-            // Track sender before dispatch — needed for auto-mention fallback
-            // in sendReplyToThenvoi (deliverMessage owns tracking for the other path)
-            if (message.threadId && message.senderId && message.senderName) {
-              trackSender(message.threadId, message.senderId, message.senderName);
-            }
-
-            const inboundCtx = {
-              Body: message.text,
-              RawBody: message.text,
-              BodyForCommands: message.text,
-              CommandBody: message.text,
-              From: message.senderId,
-              SenderId: message.senderId,
-              SenderName: message.senderName,
-              To: message.threadId,
-              SessionKey: `thenvoi:${message.threadId}`,
-              Surface: "thenvoi",
-              Provider: "thenvoi",
-              MessageSid: (message.metadata as Record<string, unknown>)?.messageId,
-              Timestamp: message.timestamp ? new Date(message.timestamp).getTime() : Date.now(),
-              ChatType: "group",
-              CommandAuthorized: true,
-            };
-
-            // Contact events use a virtual thread — don't try to send to Thenvoi
-            const isContactThread = message.threadId === CONTACTS_THREAD_ID;
-            const dispatcher = {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              sendToolResult: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
-                return true;
-              },
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              sendBlockReply: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
-                return true;
-              },
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              sendFinalReply: (payload: any): boolean => {
-                if (!isContactThread) void sendReplyToThenvoi(link.rest, config.agentId, message.threadId, payload);
-                return true;
-              },
-              waitForIdle: async (): Promise<void> => Promise.resolve(),
-              getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
-            };
-
-            console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
-            const cfg = openclawRuntime.config.loadConfig();
-            await openclawRuntime.channel.reply.dispatchReplyFromConfig({
-              ctx: inboundCtx,
-              cfg,
-              dispatcher,
-            });
-            console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
-          } catch (error) {
-            console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
+        // Disconnect any existing connection to prevent orphaned connections on reload
+        if (links().has(accountId)) {
+          console.log(`[thenvoi:${accountId}] Disconnecting previous connection before restart...`);
+          const existingPresence = presences().get(accountId);
+          if (existingPresence) {
+            await existingPresence.stop();
+            presences().delete(accountId);
           }
-        } else {
-          // deliverMessage handles sender tracking and warns if no callback is set
-          deliverMessage(message);
+          const existingLink = links().get(accountId);
+          if (existingLink) {
+            await existingLink.disconnect();
+          }
+          links().delete(accountId);
         }
 
-        // Mark message as processed
-        const messageId = event.payload.id;
-        const roomId = event.roomId ?? event.payload.chat_room_id;
-        if (roomId && messageId) {
-          try {
-            await link.markProcessed(roomId, messageId, { bestEffort: true });
-          } catch {
-            // Best effort - don't fail if marking fails
-          }
-        }
-      };
+        const config = resolveConfig(accountConfig);
 
-      // Create a singleton ContactEventHandler for this account
-      // (maintains dedup state, hub room ID, and request cache across events)
-      const contactHandler = new ContactEventHandler({
-        config: { strategy: "hub_room", broadcastChanges: true },
-        rest: link.rest,
-        onBroadcast: (msg: string) => {
-          console.log(`[thenvoi:${accountId}] Contact broadcast: ${msg}`);
-        },
-      });
-
-      // Handle contact events
-      presence.onContactEvent = async (event: ContactEvent) => {
-        console.log(`[thenvoi:${accountId}] Contact event: ${event.type}`);
-        await contactHandler.handle(event);
-      };
-
-      presences.set(accountId, presence);
-
-      // Start the event loop
-      await presence.start();
-
-      console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
-
-      // Block until OpenClaw signals shutdown — startAccount must stay
-      // alive for the lifetime of the connection, otherwise OpenClaw
-      // treats the exit as a failure and triggers auto-restart.
-      if (!ctx.abortSignal.aborted) {
-        await new Promise<void>((resolve) => {
-          ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+        // Create ThenvoiLink (combines WebSocket + REST)
+        const link = new ThenvoiLink({
+          agentId: config.agentId,
+          apiKey: config.apiKey,
+          wsUrl: config.wsUrl,
+          restUrl: config.restUrl,
         });
-      }
+        links().set(accountId, link);
+        console.log(`[thenvoi:${accountId}] Link created`);
 
-      console.log(`[thenvoi:${accountId}] Shutdown signal received`);
+        // Connect WebSocket
+        await link.connect();
+        console.log(`[thenvoi:${accountId}] WebSocket connected`);
+
+        // Create RoomPresence for automatic room subscription management
+        const presence = new RoomPresence({
+          link,
+          autoSubscribeExistingRooms: true,
+        });
+
+        // Set up room event handlers
+        presence.onRoomJoined = async (roomId: string, payload: Record<string, unknown>) => {
+          const title = (payload.title as string) ?? roomId;
+          console.log(`[thenvoi:${accountId}] Joined room: ${title} (${roomId})`);
+        };
+
+        presence.onRoomLeft = async (roomId: string) => {
+          console.log(`[thenvoi:${accountId}] Left room: ${roomId}`);
+        };
+
+        // Handle room events (messages, participant changes)
+        presence.onRoomEvent = async (_roomId: string, event: PlatformEvent) => {
+          // Only process message_created events
+          if (event.type !== "message_created") return;
+
+          // Skip messages from our own agent
+          if (event.payload.sender_id === config.agentId) return;
+
+          const message = platformEventToInboundMessage(event);
+          if (!message) return;
+
+          // Try OpenClaw dispatch first
+          const rt = registry().openclawRuntime;
+          const dispatchFn = rt?.channel?.reply?.dispatchReplyFromConfig;
+          if (rt?.config && dispatchFn) {
+            try {
+              // Track sender before dispatch — needed for auto-mention fallback
+              // in sendReplyToThenvoi (deliverMessage owns tracking for the other path)
+              if (message.threadId && message.senderId && message.senderName) {
+                trackSender(accountId, message.threadId, message.senderId, message.senderName);
+              }
+
+              const inboundCtx = {
+                Body: message.text,
+                RawBody: message.text,
+                BodyForCommands: message.text,
+                CommandBody: message.text,
+                From: message.senderId,
+                SenderId: message.senderId,
+                SenderName: message.senderName,
+                To: message.threadId,
+                SessionKey: `thenvoi:${message.threadId}`,
+                Surface: "thenvoi",
+                Provider: "thenvoi",
+                MessageSid: (message.metadata as Record<string, unknown>)?.messageId,
+                Timestamp: message.timestamp ? new Date(message.timestamp).getTime() : Date.now(),
+                ChatType: "group",
+                CommandAuthorized: true,
+              };
+
+              // Contact events use a virtual thread — don't try to send to Thenvoi
+              const isContactThread = message.threadId === CONTACTS_THREAD_ID;
+
+              const threadId = message.threadId;
+
+              // For contact threads, use a no-op dispatcher — no replies to send
+              const noopSend = (): boolean => true;
+              const dispatcher = isContactThread
+                ? {
+                    sendToolResult: noopSend,
+                    sendBlockReply: noopSend,
+                    sendFinalReply: noopSend,
+                    waitForIdle: async (): Promise<void> => {},
+                    getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
+                  }
+                : (() => {
+                    // Track pending reply promises so waitForIdle can await them
+                    const pendingReplies: Promise<void>[] = [];
+                    const deliveryErrors: Error[] = [];
+
+                    function enqueueReply(payload: unknown): void {
+                      pendingReplies.push(
+                        sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).catch((err: unknown) => {
+                          const error = err instanceof Error ? err : new Error(String(err));
+                          deliveryErrors.push(error);
+                          console.error(`[thenvoi:${accountId}] Reply delivery failed (room=${threadId}):`, error.message);
+                        }),
+                      );
+                    }
+
+                    return {
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      sendToolResult: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      sendBlockReply: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      sendFinalReply: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      waitForIdle: async (): Promise<void> => {
+                        await Promise.allSettled(pendingReplies);
+                        if (deliveryErrors.length > 0) {
+                          const summary = deliveryErrors.map((e) => e.message).join("; ");
+                          console.error(
+                            `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`,
+                          );
+                        }
+                      },
+                      getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
+                    };
+                  })();
+
+              console.log(`[thenvoi:${accountId}] Dispatching message to OpenClaw agent...`);
+              const cfg = rt.config.loadConfig();
+              await dispatchFn({
+                ctx: inboundCtx,
+                cfg,
+                dispatcher,
+              });
+              console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
+            } catch (error) {
+              console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
+            }
+          } else {
+            // deliverMessage handles sender tracking and warns if no callback is set
+            deliverMessage(message, accountId);
+          }
+
+          // Mark message as processed
+          const messageId = event.payload.id;
+          const roomId = event.roomId ?? event.payload.chat_room_id;
+          if (roomId && messageId) {
+            try {
+              await link.markProcessed(roomId, messageId, { bestEffort: true });
+            } catch {
+              // Best effort - don't fail if marking fails
+            }
+          }
+        };
+
+        // Create a singleton ContactEventHandler for this account
+        // (maintains dedup state, hub room ID, and request cache across events)
+        const contactHandler = new ContactEventHandler({
+          config: { strategy: "hub_room", broadcastChanges: true },
+          rest: link.rest,
+          onBroadcast: (msg: string) => {
+            console.log(`[thenvoi:${accountId}] Contact broadcast: ${msg}`);
+          },
+        });
+
+        // Handle contact events
+        presence.onContactEvent = async (event: ContactEvent) => {
+          try {
+            console.log(`[thenvoi:${accountId}] Contact event: ${event.type}`);
+            await contactHandler.handle(event);
+          } catch (error) {
+            console.error(`[thenvoi:${accountId}] Failed to handle contact event:`, error);
+          }
+        };
+
+        presences().set(accountId, presence);
+
+        // Start the event loop
+        await presence.start();
+
+        console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
+
+        // Block until OpenClaw signals shutdown — startAccount must stay
+        // alive for the lifetime of the connection, otherwise OpenClaw
+        // treats the exit as a failure and triggers auto-restart.
+        if (!ctx.abortSignal.aborted) {
+          await new Promise<void>((resolve) => {
+            ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+
+        console.log(`[thenvoi:${accountId}] Shutdown signal received`);
+      } finally {
+        registry().startingAccounts.delete(accountId);
+      }
     },
 
     stopAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId } = ctx;
+      registry().startingAccounts.delete(accountId);
 
-      const presence = presences.get(accountId);
+      const presence = presences().get(accountId);
       if (presence) {
         await presence.stop();
-        presences.delete(accountId);
+        presences().delete(accountId);
       }
 
-      const link = links.get(accountId);
+      const link = links().get(accountId);
       if (link) {
         await link.disconnect();
-        links.delete(accountId);
+        links().delete(accountId);
       }
 
       console.log(`[thenvoi:${accountId}] Disconnected from Thenvoi platform`);
@@ -777,27 +879,12 @@ export function registerChannel(api: OpenClawChannelApi): void {
  * Get the ThenvoiLink for an account.
  */
 export function getLink(accountId: string = "default"): ThenvoiLink | undefined {
-  return links.get(accountId);
+  return links().get(accountId);
 }
 
 /**
  * Get the current agent's ID (UUID).
  */
 export function getAgentId(accountId: string = "default"): string | undefined {
-  return links.get(accountId)?.agentId;
+  return links().get(accountId)?.agentId;
 }
-
-// =============================================================================
-// Test Utilities (not part of public API)
-// =============================================================================
-
-/** @internal — exported for unit testing only */
-export const _testing = {
-  platformEventToInboundMessage,
-  resolveMentions,
-  trackSender,
-  clearParticipantCache: () => participantCache.clear(),
-  clearSenderCache: () => lastSenderByThread.clear(),
-  getSenderCacheSize: () => lastSenderByThread.size,
-  MAX_SENDER_CACHE,
-};

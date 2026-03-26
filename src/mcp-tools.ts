@@ -13,7 +13,7 @@ import { getLink, getAgentId } from "./channel.js";
 
 interface LookupPeersParams { page?: number; page_size?: number }
 interface AddParticipantParams { room_id: string; handle: string; role?: string }
-interface RemoveParticipantParams { room_id: string; name: string }
+interface RemoveParticipantParams { room_id: string; name: string; participant_id?: string }
 interface GetParticipantsParams { room_id: string }
 interface CreateChatroomParams { task_id?: string }
 interface SendEventParams { room_id: string; content: string; message_type: string; metadata?: Record<string, unknown> }
@@ -76,6 +76,16 @@ function requireMethod<T extends (...args: any[]) => any>(
   return method.bind(rest) as T;
 }
 
+/**
+ * Clamp pagination parameters to valid ranges.
+ */
+function clampPagination(page: number, pageSize: number): { page: number; pageSize: number } {
+  return {
+    page: Math.max(1, Math.floor(page)),
+    pageSize: Math.max(1, Math.min(100, Math.floor(pageSize))),
+  };
+}
+
 // =============================================================================
 // Tool: thenvoi_lookup_peers
 // =============================================================================
@@ -101,10 +111,11 @@ const lookupPeersTool: McpTool = {
     },
   },
   handler: async (params: unknown) => {
-    const { page = 1, page_size = 50 } = params as LookupPeersParams;
+    const { page: rawPage = 1, page_size: rawPageSize = 50 } = params as LookupPeersParams;
+    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
     const rest = getRest();
 
-    const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize: page_size, notInChat: "" });
+    const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize, notInChat: "" });
 
     return {
       peers: (response.data ?? []).map((peer) => ({
@@ -128,13 +139,14 @@ const addParticipantTool: McpTool = {
   name: "thenvoi_add_participant",
   description:
     "Invite an agent or user to join a Thenvoi chat room. " +
-    "Use lookup_peers first to find available participants.",
+    "Use lookup_peers first to find available participants. " +
+    "IMPORTANT: room_id must be the To field from your message context — do NOT use agent IDs, user IDs, or owner IDs.",
   inputSchema: {
     type: "object",
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to add the participant to",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       handle: {
         type: "string",
@@ -155,31 +167,52 @@ const addParticipantTool: McpTool = {
     const { room_id, handle, role = "member" } = params as AddParticipantParams;
     const rest = getRest();
 
-    // Lookup the peer to validate it exists and get canonical handle
-    const peersResponse = await requireMethod(rest, rest.listPeers, "listPeers")({ page: 1, pageSize: 100, notInChat: "" });
+    // Lookup the peer to validate it exists and get canonical handle.
+    // Paginate through all results to avoid silently missing peers beyond the first page.
+    const listPeers = requireMethod(rest, rest.listPeers, "listPeers");
     const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
-    const peer = (peersResponse.data ?? []).find(
-      (p) =>
-        p.name?.toLowerCase() === normalizedHandle ||
-        p.handle?.toLowerCase() === normalizedHandle
-    );
+    let foundPeerId: string | undefined;
+    let foundPeerName: string | undefined;
+    let foundPeerType: string | undefined;
+    let page = 1;
+    const pageSize = 100;
+    const maxPages = 10; // Cap at 10 pages (1000 peers) to prevent runaway API calls
 
-    if (!peer || !peer.id) {
+    while (!foundPeerId && page <= maxPages) {
+      const peersResponse = await listPeers({ page, pageSize, notInChat: "" });
+      const match = (peersResponse.data ?? []).find(
+        (p) =>
+          p.name?.toLowerCase() === normalizedHandle ||
+          p.handle?.replace(/^@/, "").toLowerCase() === normalizedHandle
+      );
+      if (match?.id) {
+        foundPeerId = match.id;
+        foundPeerName = match.name;
+        foundPeerType = match.type;
+        break;
+      }
+      const totalPages = peersResponse.metadata?.totalPages ?? 1;
+      if (page >= totalPages) break;
+      page++;
+    }
+
+    if (!foundPeerId) {
       throw new Error(
         `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
       );
     }
 
-    await rest.addChatParticipant(room_id, { participantId: peer.id, role });
+    const response = await rest.addChatParticipant(room_id, { participantId: foundPeerId, role });
 
     return {
       success: true,
       participant: {
-        id: peer.id,
-        name: peer.name,
-        type: peer.type,
+        id: foundPeerId,
+        name: foundPeerName,
+        type: foundPeerType,
         role,
       },
+      response,
     };
   },
 };
@@ -196,24 +229,50 @@ const removeParticipantTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to remove the participant from",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       name: {
         type: "string",
-        description: "Name of the agent or user to remove",
+        description: "Name of the agent or user to remove (resolved to ID via participants list)",
+      },
+      participant_id: {
+        type: "string",
+        description: "Or provide the participant UUID directly (skips name resolution)",
       },
     },
-    required: ["room_id", "name"],
+    required: ["room_id"],
   },
   handler: async (params: unknown) => {
-    const { room_id, name } = params as RemoveParticipantParams;
+    const { room_id, name, participant_id } = params as RemoveParticipantParams;
     const rest = getRest();
 
-    await rest.removeChatParticipant(room_id, name);
+    let resolvedId = participant_id;
+    let resolvedName = name ?? participant_id;
+
+    if (!resolvedId) {
+      if (!name) {
+        throw new Error("Either name or participant_id is required");
+      }
+      // Resolve name to ID via the room's participant list
+      const selfAgentId = getAgentId();
+      const participants = await rest.listChatParticipants(room_id);
+      const match = participants.find(
+        (p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== selfAgentId
+      );
+      if (!match) {
+        throw new Error(
+          `Participant "${name}" not found in room. Use thenvoi_get_participants to see current participants.`
+        );
+      }
+      resolvedId = match.id;
+      resolvedName = match.name;
+    }
+
+    await rest.removeChatParticipant(room_id, resolvedId);
 
     return {
       success: true,
-      message: `Removed ${name} from room`,
+      message: `Removed ${resolvedName} from room`,
     };
   },
 };
@@ -230,7 +289,7 @@ const getParticipantsTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to list participants for",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
     },
     required: ["room_id"],
@@ -243,6 +302,7 @@ const getParticipantsTool: McpTool = {
 
     return {
       participants: participants.map((p) => ({
+        id: p.id,
         name: p.name,
         type: p.type,
       })),
@@ -302,7 +362,7 @@ const sendEventTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to send the event to",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       content: {
         type: "string",
@@ -355,7 +415,7 @@ const sendMessageTool: McpTool = {
     properties: {
       room_id: {
         type: "string",
-        description: "The ID of the room to send the message to (use the thread_id from the conversation)",
+        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
       },
       content: {
         type: "string",
@@ -405,6 +465,7 @@ const sendMessageTool: McpTool = {
     return {
       success: true,
       message_id: response.id,
+      response,
     };
   },
 };
@@ -432,10 +493,11 @@ const listContactsTool: McpTool = {
     },
   },
   handler: async (params: unknown) => {
-    const { page = 1, page_size = 50 } = params as ListContactsParams;
+    const { page: rawPage = 1, page_size: rawPageSize = 50 } = params as ListContactsParams;
+    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
     const rest = getRest();
 
-    const response = await requireMethod(rest, rest.listContacts, "listContacts")({ page, pageSize: page_size });
+    const response = await requireMethod(rest, rest.listContacts, "listContacts")({ page, pageSize });
 
     return {
       contacts: (response.data ?? []).map((c) => ({
@@ -481,9 +543,7 @@ const addContactTool: McpTool = {
 
     return {
       success: true,
-      id: response.id,
-      status: response.status,
-      to_handle: response.to_handle,
+      ...response,
     };
   },
 };
@@ -561,10 +621,11 @@ const listContactRequestsTool: McpTool = {
     },
   },
   handler: async (params: unknown) => {
-    const { page = 1, page_size = 50, sent_status = "pending" } = params as ListContactRequestsParams;
+    const { page: rawPage = 1, page_size: rawPageSize = 50, sent_status = "pending" } = params as ListContactRequestsParams;
+    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
     const rest = getRest();
 
-    const response = await requireMethod(rest, rest.listContactRequests, "listContactRequests")({ page, pageSize: page_size, sentStatus: sent_status });
+    const response = await requireMethod(rest, rest.listContactRequests, "listContactRequests")({ page, pageSize, sentStatus: sent_status });
 
     return {
       received: (response.received ?? []).map((r) => ({
@@ -631,8 +692,7 @@ const respondContactRequestTool: McpTool = {
 
     return {
       success: true,
-      id: response.id,
-      status: response.status,
+      ...response,
     };
   },
 };
