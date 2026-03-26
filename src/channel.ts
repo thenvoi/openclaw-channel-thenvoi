@@ -581,14 +581,15 @@ export const thenvoiChannel: OpenClawChannel = {
         const message = platformEventToInboundMessage(event);
         if (!message) return;
 
-        // Track sender for auto-mention fallback
-        if (message.threadId && message.senderId && message.senderName) {
-          trackSender(message.threadId, message.senderId, message.senderName);
-        }
-
         // Try OpenClaw dispatch first
         if (openclawRuntime?.channel?.reply?.dispatchReplyFromConfig) {
           try {
+            // Track sender before dispatch — needed for auto-mention fallback
+            // in sendReplyToThenvoi (deliverMessage owns tracking for the other path)
+            if (message.threadId && message.senderId && message.senderName) {
+              trackSender(message.threadId, message.senderId, message.senderName);
+            }
+
             const inboundCtx = {
               Body: message.text,
               RawBody: message.text,
@@ -640,10 +641,9 @@ export const thenvoiChannel: OpenClawChannel = {
           } catch (error) {
             console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
           }
-        } else if (deliverInbound) {
-          deliverInbound(message);
         } else {
-          console.warn(`[thenvoi:${accountId}] No dispatch method available for inbound message`);
+          // deliverMessage handles sender tracking and warns if no callback is set
+          deliverMessage(message);
         }
 
         // Mark message as processed
@@ -684,9 +684,11 @@ export const thenvoiChannel: OpenClawChannel = {
       // Block until OpenClaw signals shutdown — startAccount must stay
       // alive for the lifetime of the connection, otherwise OpenClaw
       // treats the exit as a failure and triggers auto-restart.
-      await new Promise<void>((resolve) => {
-        ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
-      });
+      if (!ctx.abortSignal.aborted) {
+        await new Promise<void>((resolve) => {
+          ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }
 
       console.log(`[thenvoi:${accountId}] Shutdown signal received`);
     },
