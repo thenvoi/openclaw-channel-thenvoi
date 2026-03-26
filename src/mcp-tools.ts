@@ -170,7 +170,7 @@ const addParticipantTool: McpTool = {
       );
     }
 
-    const response = await rest.addChatParticipant(room_id, { participantId: peer.id, role });
+    await rest.addChatParticipant(room_id, { participantId: peer.id, role });
 
     return {
       success: true,
