@@ -24,11 +24,13 @@ export interface ThenvoiAccountConfig {
   contactConfig?: ContactEventConfig;
 }
 
+export type SenderType = "User" | "Agent" | "System";
+
 export interface OpenClawInboundMessage {
   channelId: "thenvoi";
   threadId: string;
   senderId: string;
-  senderType: string;
+  senderType: SenderType;
   senderName: string;
   text: string;
   timestamp: string;
@@ -203,6 +205,27 @@ function trackSender(threadId: string, senderId: string, senderName: string): vo
   lastSenderByThread.set(threadId, { senderId, senderName });
 }
 
+// =============================================================================
+// Participant Cache (avoid per-message API calls in resolveMentions)
+// =============================================================================
+
+const PARTICIPANT_CACHE_TTL_MS = 5_000; // 5 seconds
+
+const participantCache = new Map<string, { data: Array<{ id: string; name: string; type?: string }>; ts: number }>();
+
+async function getCachedParticipants(
+  rest: ThenvoiLink["rest"],
+  roomId: string,
+): Promise<Array<{ id: string; name: string; type?: string }>> {
+  const entry = participantCache.get(roomId);
+  if (entry && Date.now() - entry.ts < PARTICIPANT_CACHE_TTL_MS) {
+    return entry.data;
+  }
+  const data = await rest.listChatParticipants(roomId);
+  participantCache.set(roomId, { data, ts: Date.now() });
+  return data;
+}
+
 // Gateway callback for delivering inbound messages
 let deliverInbound: ((message: OpenClawInboundMessage) => void) | null = null;
 
@@ -285,7 +308,7 @@ async function resolveMentions(
   roomId: string,
   text: string,
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
-  const participants = await rest.listChatParticipants(roomId);
+  const participants = await getCachedParticipants(rest, roomId);
 
   // 1. Explicit @Name mentions in text
   const mentioned: Mention[] = [];
@@ -363,7 +386,7 @@ function platformEventToInboundMessage(event: PlatformEvent): OpenClawInboundMes
     channelId: "thenvoi",
     threadId: roomId,
     senderId: payload.sender_id,
-    senderType: payload.sender_type,
+    senderType: payload.sender_type as SenderType,
     senderName: payload.sender_name ?? "Unknown",
     text: payload.content,
     timestamp: payload.inserted_at,
@@ -763,3 +786,18 @@ export function getLink(accountId: string = "default"): ThenvoiLink | undefined 
 export function getAgentId(accountId: string = "default"): string | undefined {
   return links.get(accountId)?.agentId;
 }
+
+// =============================================================================
+// Test Utilities (not part of public API)
+// =============================================================================
+
+/** @internal — exported for unit testing only */
+export const _testing = {
+  platformEventToInboundMessage,
+  resolveMentions,
+  trackSender,
+  clearParticipantCache: () => participantCache.clear(),
+  clearSenderCache: () => lastSenderByThread.clear(),
+  getSenderCacheSize: () => lastSenderByThread.size,
+  MAX_SENDER_CACHE,
+};

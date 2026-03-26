@@ -26,6 +26,8 @@ function discoverNamedImports(peers: string[]): Map<string, Set<string>> {
   //   import { a as x, b } from "pkg/sub";
   // It intentionally does NOT match dynamic `import("pkg")` – those don't need
   // named exports.
+  // Limitations: won't catch `import * as X`, `export { X } from "pkg"`, or
+  // imports split across >2 lines. Sufficient for typical SDK compiled output.
   const importPattern =
     /import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']\s*;?/g;
 

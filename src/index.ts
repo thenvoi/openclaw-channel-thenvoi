@@ -128,7 +128,7 @@ export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } f
 export { getLink, getAgentId } from "./channel.js";
 
 // OpenClaw-specific type exports
-export type { ThenvoiAccountConfig, OpenClawInboundMessage } from "./channel.js";
+export type { ThenvoiAccountConfig, OpenClawInboundMessage, SenderType } from "./channel.js";
 
 // MCP tool exports
 export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";

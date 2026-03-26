@@ -12,6 +12,7 @@ export default defineConfig({
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.ts"],
       exclude: ["src/index.ts"],
+      // TODO: Restore to 80% once tests for new SDK-backed code paths are complete
       thresholds: {
         global: {
           branches: 70,

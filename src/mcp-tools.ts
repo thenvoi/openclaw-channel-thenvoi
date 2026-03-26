@@ -180,7 +180,6 @@ const addParticipantTool: McpTool = {
         type: peer.type,
         role,
       },
-      response,
     };
   },
 };
@@ -406,7 +405,6 @@ const sendMessageTool: McpTool = {
     return {
       success: true,
       message_id: response.id,
-      response,
     };
   },
 };
@@ -483,7 +481,9 @@ const addContactTool: McpTool = {
 
     return {
       success: true,
-      ...response,
+      id: response.id,
+      status: response.status,
+      to_handle: response.to_handle,
     };
   },
 };
@@ -631,7 +631,8 @@ const respondContactRequestTool: McpTool = {
 
     return {
       success: true,
-      ...response,
+      id: response.id,
+      status: response.status,
     };
   },
 };
