@@ -365,6 +365,22 @@ function resolveConfig(account: ThenvoiAccountConfig): { apiKey: string; agentId
 
 type Mention = { id: string; name?: string };
 
+// Per-room participant cache with 5-second TTL to avoid hitting the REST API
+// on every outbound message in rapid back-and-forth conversations.
+const PARTICIPANT_CACHE_TTL_MS = 5_000;
+const participantCache = new Map<string, { participants: Array<{ id: string; name: string }>; expiresAt: number }>();
+
+async function getCachedParticipants(
+  rest: ThenvoiLink["rest"],
+  roomId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const cached = participantCache.get(roomId);
+  if (cached && cached.expiresAt > Date.now()) return cached.participants;
+  const participants = await rest.listChatParticipants(roomId);
+  participantCache.set(roomId, { participants, expiresAt: Date.now() + PARTICIPANT_CACHE_TTL_MS });
+  return participants;
+}
+
 /**
  * Resolve mentions for a message: find @Name in text, fall back to last sender, then any participant.
  * Returns null if no participants are available to mention (caller decides how to handle).
@@ -376,14 +392,18 @@ async function resolveMentions(
   roomId: string,
   text: string,
 ): Promise<{ mentions: Mention[]; participants: Array<{ id: string; name: string }> } | null> {
-  const participants = await rest.listChatParticipants(roomId);
+  const participants = await getCachedParticipants(rest, roomId);
 
-  // 1. Explicit @Name mentions in text (case-insensitive)
+  // 1. Explicit @Name mentions in text (case-insensitive, word-boundary matching)
   const mentioned: Mention[] = [];
   const textLower = text.toLowerCase();
   for (const p of participants) {
-    if (p.id !== agentId && textLower.includes(`@${p.name.toLowerCase()}`)) {
-      mentioned.push({ id: p.id, name: p.name });
+    if (p.id !== agentId) {
+      const nameEscaped = p.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const nameRegex = new RegExp(`@${nameEscaped}(?:\\b|$)`, "i");
+      if (nameRegex.test(textLower)) {
+        mentioned.push({ id: p.id, name: p.name });
+      }
     }
   }
   if (mentioned.length > 0) return { mentions: mentioned, participants };
@@ -671,6 +691,7 @@ export const thenvoiChannel: OpenClawChannel = {
           // Try OpenClaw dispatch first
           const rt = registry().openclawRuntime;
           const dispatchFn = rt?.channel?.reply?.dispatchReplyFromConfig;
+          let dispatchSucceeded = false;
           if (rt?.config && dispatchFn) {
             try {
               // Track sender before dispatch — needed for auto-mention fallback
@@ -757,22 +778,27 @@ export const thenvoiChannel: OpenClawChannel = {
               // Await any pending reply deliveries and surface errors
               await dispatcher.waitForIdle();
               console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
+              dispatchSucceeded = true;
             } catch (error) {
               console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
             }
           } else {
             // deliverMessage handles sender tracking and warns if no callback is set
             deliverMessage(message, accountId);
+            dispatchSucceeded = true;
           }
 
-          // Mark message as processed
-          const messageId = event.payload.id;
-          const roomId = event.roomId ?? event.payload.chat_room_id;
-          if (roomId && messageId) {
-            try {
-              await link.markProcessed(roomId, messageId, { bestEffort: true });
-            } catch {
-              // Best effort - don't fail if marking fails
+          // Only mark as processed if dispatch succeeded — failed messages
+          // should remain unprocessed so they can be retried on reconnect.
+          if (dispatchSucceeded) {
+            const messageId = event.payload.id;
+            const roomId = event.roomId ?? event.payload.chat_room_id;
+            if (roomId && messageId) {
+              try {
+                await link.markProcessed(roomId, messageId, { bestEffort: true });
+              } catch {
+                // Best effort - don't fail if marking fails
+              }
             }
           }
         };
