@@ -74,7 +74,7 @@ export const mcpTools: McpTool[] = registrations.map((reg) => ({
     }
     // Return the parsed content for OpenClaw's tool result format
     try {
-      return JSON.parse(result.content[0]?.text ?? "{}");
+      return JSON.parse(result.content?.[0]?.text ?? "{}");
     } catch {
       return result;
     }

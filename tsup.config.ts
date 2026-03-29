@@ -164,7 +164,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   shims: true,
-  target: "node22",
+  target: "node24",
   outDir: "dist",
   // Keep openclaw external (host provides it)
   external: ["openclaw"],

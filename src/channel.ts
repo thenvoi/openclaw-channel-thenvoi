@@ -754,6 +754,8 @@ export const thenvoiChannel: OpenClawChannel = {
                 cfg,
                 dispatcher,
               });
+              // Await any pending reply deliveries and surface errors
+              await dispatcher.waitForIdle();
               console.log(`[thenvoi:${accountId}] Message dispatched successfully`);
             } catch (error) {
               console.error(`[thenvoi:${accountId}] Failed to dispatch message:`, error);
