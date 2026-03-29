@@ -169,4 +169,7 @@ export type {
   ChatParticipant,
 } from "@thenvoi/sdk/rest";
 
-export { ContactEventHandler, RoomPresence } from "@thenvoi/sdk/runtime";
+export { ContactEventHandler, RoomPresence, AgentTools } from "@thenvoi/sdk/runtime";
+
+export { buildRoomScopedRegistrations, buildSingleContextRegistrations } from "@thenvoi/sdk/mcp";
+export type { McpToolRegistration } from "@thenvoi/sdk/mcp";

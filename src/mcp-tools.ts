@@ -1,721 +1,85 @@
 /**
  * MCP Tools for Thenvoi platform operations.
  *
- * Exposes Thenvoi platform tools via MCP (Model Context Protocol)
- * for use by OpenClaw agents. Uses @thenvoi/sdk REST API.
+ * Uses @thenvoi/sdk's buildRoomScopedRegistrations to auto-generate tool
+ * schemas and execution logic from AgentTools. The SDK is the single source
+ * of truth for tool names, schemas, and handlers — new tools or schema
+ * changes are picked up automatically on SDK bumps.
  */
 
-import { getLink, getAgentId } from "./channel.js";
+import { AgentTools } from "@thenvoi/sdk/runtime";
+import { buildRoomScopedRegistrations } from "@thenvoi/sdk/mcp";
+import type { McpToolRegistration, McpToolInputSchema, McpToolResult } from "@thenvoi/sdk/mcp";
+import { getLink } from "./channel.js";
 
 // =============================================================================
-// MCP Tool Types (local to this module)
+// Tool Resolution
 // =============================================================================
 
-interface LookupPeersParams { page?: number; page_size?: number }
-interface AddParticipantParams { room_id: string; handle: string; role?: string }
-interface RemoveParticipantParams { room_id: string; name: string; participant_id?: string }
-interface GetParticipantsParams { room_id: string }
-interface CreateChatroomParams { task_id?: string }
-interface SendEventParams { room_id: string; content: string; message_type: string; metadata?: Record<string, unknown> }
-interface SendMessageParams { room_id: string; content: string; mentions: string[] }
-interface ListContactsParams { page?: number; page_size?: number }
-interface AddContactParams { handle: string; message?: string }
-interface RemoveContactParams { handle?: string; contact_id?: string }
-interface ListContactRequestsParams { page?: number; page_size?: number; sent_status?: string }
-interface RespondContactRequestParams { action: "approve" | "reject" | "cancel"; handle?: string; request_id?: string }
+/**
+ * Resolve an AdapterToolsProtocol instance for a given room.
+ * Called by the SDK's room-scoped registration builder on each tool invocation.
+ */
+function resolveToolsForRoom(roomId: string) {
+  const link = getLink();
+  if (!link) {
+    return undefined;
+  }
+  const tools = new AgentTools({
+    roomId,
+    rest: link.rest,
+    capabilities: link.capabilities,
+  });
+  return tools.getAdapterTools();
+}
 
 // =============================================================================
-// MCP Tool Definitions
+// Build Registrations via SDK
+// =============================================================================
+
+const registrations: McpToolRegistration[] = buildRoomScopedRegistrations(
+  resolveToolsForRoom,
+  {
+    enableContactTools: true,
+    enableMemoryTools: false,
+  },
+);
+
+// =============================================================================
+// Public API (compatible with existing consumers)
 // =============================================================================
 
 export interface McpTool {
   name: string;
   description: string;
-  inputSchema: McpInputSchema;
+  inputSchema: McpToolInputSchema;
   handler: (params: unknown) => Promise<unknown>;
 }
 
-interface McpInputSchema {
-  type: "object";
-  properties: Record<string, McpProperty>;
-  required?: string[];
-}
-
-interface McpProperty {
-  type: string;
-  description: string;
-  default?: unknown;
-  enum?: string[];
-  items?: { type: string };
-}
-
-// =============================================================================
-// Helper: get REST API from link
-// =============================================================================
-
-function getRest() {
-  const link = getLink();
-  if (!link) {
-    throw new Error("Thenvoi client not connected");
-  }
-  return link.rest;
-}
-
 /**
- * Assert that an optional REST method exists and return it bound to the rest object.
+ * All registered MCP tools, adapted from SDK registrations.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function requireMethod<T extends (...args: any[]) => any>(
-  rest: object,
-  method: T | undefined,
-  name: string,
-): T {
-  if (!method) {
-    throw new Error(`REST method "${name}" is not available on this API adapter`);
-  }
-  return method.bind(rest) as T;
-}
-
-/**
- * Clamp pagination parameters to valid ranges.
- */
-function clampPagination(page: number, pageSize: number): { page: number; pageSize: number } {
-  return {
-    page: Math.max(1, Math.floor(page)),
-    pageSize: Math.max(1, Math.min(100, Math.floor(pageSize))),
-  };
-}
-
-// =============================================================================
-// Tool: thenvoi_lookup_peers
-// =============================================================================
-
-const lookupPeersTool: McpTool = {
-  name: "thenvoi_lookup_peers",
-  description:
-    "Find available agents and users on the Thenvoi platform. " +
-    "Use this to discover who you can invite to collaborate.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      page: {
-        type: "number",
-        description: "Page number for pagination (default: 1)",
-        default: 1,
-      },
-      page_size: {
-        type: "number",
-        description: "Number of results per page (default: 50, max: 100)",
-        default: 50,
-      },
-    },
-  },
+export const mcpTools: McpTool[] = registrations.map((reg) => ({
+  name: reg.name,
+  description: reg.description,
+  inputSchema: reg.inputSchema,
   handler: async (params: unknown) => {
-    const { page: rawPage = 1, page_size: rawPageSize = 50 } = params as LookupPeersParams;
-    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
-    const rest = getRest();
-
-    const response = await requireMethod(rest, rest.listPeers, "listPeers")({ page, pageSize, notInChat: "" });
-
-    return {
-      peers: (response.data ?? []).map((peer) => ({
-        id: peer.id,
-        handle: peer.handle,
-        name: peer.name,
-        type: peer.type,
-        description: peer.description,
-      })),
-      total: response.metadata?.totalCount ?? 0,
-      has_more: (response.metadata?.page ?? 1) < (response.metadata?.totalPages ?? 1),
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_add_participant
-// =============================================================================
-
-const addParticipantTool: McpTool = {
-  name: "thenvoi_add_participant",
-  description:
-    "Invite an agent or user to join a Thenvoi chat room. " +
-    "Use lookup_peers first to find available participants. " +
-    "IMPORTANT: room_id must be the To field from your message context — do NOT use agent IDs, user IDs, or owner IDs.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
-      },
-      handle: {
-        type: "string",
-        description:
-          "Handle of the agent or user to invite (e.g., '@john' or '@john/agent-name'). " +
-          "Can also be a name or UUID.",
-      },
-      role: {
-        type: "string",
-        description: "Role for the participant (default: member)",
-        default: "member",
-        enum: ["owner", "admin", "member"],
-      },
-    },
-    required: ["room_id", "handle"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, handle, role = "member" } = params as AddParticipantParams;
-    const rest = getRest();
-
-    // Lookup the peer to validate it exists and get canonical handle.
-    // Paginate through all results to avoid silently missing peers beyond the first page.
-    const listPeers = requireMethod(rest, rest.listPeers, "listPeers");
-    const normalizedHandle = handle.replace(/^@/, "").toLowerCase();
-    let foundPeerId: string | undefined;
-    let foundPeerName: string | undefined;
-    let foundPeerType: string | undefined;
-    let page = 1;
-    const pageSize = 100;
-    const maxPages = 10; // Cap at 10 pages (1000 peers) to prevent runaway API calls
-
-    while (!foundPeerId && page <= maxPages) {
-      const peersResponse = await listPeers({ page, pageSize, notInChat: "" });
-      const match = (peersResponse.data ?? []).find(
-        (p) =>
-          p.name?.toLowerCase() === normalizedHandle ||
-          p.handle?.replace(/^@/, "").toLowerCase() === normalizedHandle
-      );
-      if (match?.id) {
-        foundPeerId = match.id;
-        foundPeerName = match.name;
-        foundPeerType = match.type;
-        break;
-      }
-      const totalPages = peersResponse.metadata?.totalPages ?? 1;
-      if (page >= totalPages) break;
-      page++;
+    const result: McpToolResult = await reg.execute(
+      (params ?? {}) as Record<string, unknown>,
+    );
+    // If the SDK returned an error result, throw so OpenClaw surfaces it
+    if (result.isError) {
+      const text = result.content?.[0]?.text ?? "Unknown tool error";
+      throw new Error(text);
     }
-
-    if (!foundPeerId) {
-      throw new Error(
-        `Peer not found: "${handle}". Use thenvoi_lookup_peers to see available peers.`
-      );
+    // Return the parsed content for OpenClaw's tool result format
+    try {
+      return JSON.parse(result.content[0]?.text ?? "{}");
+    } catch {
+      return result;
     }
-
-    const response = await rest.addChatParticipant(room_id, { participantId: foundPeerId, role });
-
-    return {
-      success: true,
-      participant: {
-        id: foundPeerId,
-        name: foundPeerName,
-        type: foundPeerType,
-        role,
-      },
-      response,
-    };
   },
-};
-
-// =============================================================================
-// Tool: thenvoi_remove_participant
-// =============================================================================
-
-const removeParticipantTool: McpTool = {
-  name: "thenvoi_remove_participant",
-  description: "Remove an agent or user from a Thenvoi chat room.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
-      },
-      name: {
-        type: "string",
-        description: "Name of the agent or user to remove (resolved to ID via participants list)",
-      },
-      participant_id: {
-        type: "string",
-        description: "Or provide the participant UUID directly (skips name resolution)",
-      },
-    },
-    required: ["room_id"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, name, participant_id } = params as RemoveParticipantParams;
-    const rest = getRest();
-
-    let resolvedId = participant_id;
-    let resolvedName = name ?? participant_id;
-
-    if (!resolvedId) {
-      if (!name) {
-        throw new Error("Either name or participant_id is required");
-      }
-      // Resolve name to ID via the room's participant list
-      const selfAgentId = getAgentId();
-      const participants = await rest.listChatParticipants(room_id);
-      const match = participants.find(
-        (p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== selfAgentId
-      );
-      if (!match) {
-        throw new Error(
-          `Participant "${name}" not found in room. Use thenvoi_get_participants to see current participants.`
-        );
-      }
-      resolvedId = match.id;
-      resolvedName = match.name;
-    }
-
-    await rest.removeChatParticipant(room_id, resolvedId);
-
-    return {
-      success: true,
-      message: `Removed ${resolvedName} from room`,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_get_participants
-// =============================================================================
-
-const getParticipantsTool: McpTool = {
-  name: "thenvoi_get_participants",
-  description: "List all participants in a Thenvoi chat room.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
-      },
-    },
-    required: ["room_id"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id } = params as GetParticipantsParams;
-    const rest = getRest();
-
-    const participants = await rest.listChatParticipants(room_id);
-
-    return {
-      participants: participants.map((p) => ({
-        id: p.id,
-        name: p.name,
-        type: p.type,
-      })),
-      count: participants.length,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_create_chatroom
-// =============================================================================
-
-const createChatTool: McpTool = {
-  name: "thenvoi_create_chatroom",
-  description:
-    "Create a new Thenvoi chat room for collaboration. " +
-    "Use this when you need a fresh space for a new task or conversation.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      task_id: {
-        type: "string",
-        description: "Optional task ID to associate with the room",
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { task_id } = params as CreateChatroomParams;
-    const rest = getRest();
-
-    const response = await rest.createChat(task_id);
-
-    return {
-      success: true,
-      room_id: response.id,
-      message: "Chat room created successfully",
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_send_event
-// =============================================================================
-
-const sendEventTool: McpTool = {
-  name: "thenvoi_send_event",
-  description:
-    "Share events with other participants in a Thenvoi chat room. " +
-    "Event types: " +
-    "'thought' - share your reasoning process (shows thinking indicator), " +
-    "'error' - report problems or failures (shows error indicator), " +
-    "'task' - report progress or status updates (shows progress indicator), " +
-    "'tool_call' - report tool invocation (shows tool execution, include metadata with tool_call_id, name, args), " +
-    "'tool_result' - report tool completion (shows tool result, include metadata with tool_call_id, name, output).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
-      },
-      content: {
-        type: "string",
-        description: "Human-readable content of the event",
-      },
-      message_type: {
-        type: "string",
-        description: "Type of event",
-        enum: ["thought", "error", "task", "tool_call", "tool_result"],
-      },
-      metadata: {
-        type: "object",
-        description:
-          "Optional structured metadata. For tool_call: {tool_call_id, name, args}. " +
-          "For tool_result: {tool_call_id, name, output, error?}",
-      },
-    },
-    required: ["room_id", "content", "message_type"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, content, message_type, metadata } = params as SendEventParams;
-    const rest = getRest();
-
-    const response = await rest.createChatEvent(room_id, {
-      content,
-      messageType: message_type,
-      metadata,
-    });
-
-    return {
-      success: true,
-      event_id: response.id,
-      message_type,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_send_message
-// =============================================================================
-
-const sendMessageTool: McpTool = {
-  name: "thenvoi_send_message",
-  description:
-    "Send a message to a Thenvoi chat room. " +
-    "Messages require at least one @mention. Use this to respond to users or other agents. " +
-    "IMPORTANT: You MUST use this tool to communicate - plain text responses won't reach users.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      room_id: {
-        type: "string",
-        description: "The chat room UUID from the To field in your message context. Do NOT use agent/user/owner IDs.",
-      },
-      content: {
-        type: "string",
-        description: "The message content to send",
-      },
-      mentions: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "List of participant names to @mention. At least one required. " +
-          "Use thenvoi_get_participants to see available participants.",
-      },
-    },
-    required: ["room_id", "content", "mentions"],
-  },
-  handler: async (params: unknown) => {
-    const { room_id, content, mentions } = params as SendMessageParams;
-    const rest = getRest();
-
-    if (!mentions || mentions.length === 0) {
-      throw new Error("At least one mention is required to send a message");
-    }
-
-    const selfAgentId = getAgentId();
-
-    // Get participants to resolve names to IDs
-    const participants = await rest.listChatParticipants(room_id);
-
-    // Resolve mention names to participant objects
-    const resolvedMentions = mentions.map((name) => {
-      const participant = participants.find(
-        (p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== selfAgentId
-      );
-      if (!participant) {
-        throw new Error(
-          `Participant "${name}" not found in room (excluding self). Use thenvoi_get_participants to see available participants.`
-        );
-      }
-      return { id: participant.id, name: participant.name };
-    });
-
-    const response = await rest.createChatMessage(room_id, {
-      content,
-      mentions: resolvedMentions,
-    });
-
-    return {
-      success: true,
-      message_id: response.id,
-      response,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_list_contacts
-// =============================================================================
-
-const listContactsTool: McpTool = {
-  name: "thenvoi_list_contacts",
-  description: "List agent's contacts with pagination.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      page: {
-        type: "number",
-        description: "Page number (default: 1)",
-        default: 1,
-      },
-      page_size: {
-        type: "number",
-        description: "Items per page (default: 50, max: 100)",
-        default: 50,
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { page: rawPage = 1, page_size: rawPageSize = 50 } = params as ListContactsParams;
-    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
-    const rest = getRest();
-
-    const response = await requireMethod(rest, rest.listContacts, "listContacts")({ page, pageSize });
-
-    return {
-      contacts: (response.data ?? []).map((c) => ({
-        id: c.id,
-        handle: c.handle,
-        name: c.name,
-        type: c.type,
-      })),
-      metadata: response.metadata,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_add_contact
-// =============================================================================
-
-const addContactTool: McpTool = {
-  name: "thenvoi_add_contact",
-  description:
-    "Send a contact request to add someone as a contact. " +
-    "Returns 'pending' when request is created, 'approved' when auto-accepted " +
-    "(if they already sent you a request).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      handle: {
-        type: "string",
-        description: "Handle of user/agent to add (e.g., '@john' or '@john/agent-name')",
-      },
-      message: {
-        type: "string",
-        description: "Optional message with the request",
-      },
-    },
-    required: ["handle"],
-  },
-  handler: async (params: unknown) => {
-    const { handle, message } = params as AddContactParams;
-    const rest = getRest();
-
-    const response = await requireMethod(rest, rest.addContact, "addContact")({ handle, message });
-
-    return {
-      success: true,
-      ...response,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_remove_contact
-// =============================================================================
-
-const removeContactTool: McpTool = {
-  name: "thenvoi_remove_contact",
-  description: "Remove an existing contact by handle or ID.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      handle: {
-        type: "string",
-        description: "Contact's handle",
-      },
-      contact_id: {
-        type: "string",
-        description: "Or contact record ID (UUID)",
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { handle, contact_id } = params as RemoveContactParams;
-    const rest = getRest();
-
-    if (!handle && !contact_id) {
-      throw new Error("Either handle or contact_id is required");
-    }
-
-    const removeArgs = handle
-      ? { target: "handle" as const, handle }
-      : { target: "contactId" as const, contactId: contact_id! };
-
-    await requireMethod(rest, rest.removeContact, "removeContact")(removeArgs);
-
-    return {
-      success: true,
-      message: "Contact removed",
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_list_contact_requests
-// =============================================================================
-
-const listContactRequestsTool: McpTool = {
-  name: "thenvoi_list_contact_requests",
-  description:
-    "List both received and sent contact requests. " +
-    "Received requests are always filtered to pending status. " +
-    "Sent requests can be filtered by status.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      page: {
-        type: "number",
-        description: "Page number (default: 1)",
-        default: 1,
-      },
-      page_size: {
-        type: "number",
-        description: "Items per page per direction (default: 50, max: 100)",
-        default: 50,
-      },
-      sent_status: {
-        type: "string",
-        description: "Filter sent requests by status (default: pending)",
-        default: "pending",
-        enum: ["pending", "approved", "rejected", "cancelled", "all"],
-      },
-    },
-  },
-  handler: async (params: unknown) => {
-    const { page: rawPage = 1, page_size: rawPageSize = 50, sent_status = "pending" } = params as ListContactRequestsParams;
-    const { page, pageSize } = clampPagination(rawPage, rawPageSize);
-    const rest = getRest();
-
-    const response = await requireMethod(rest, rest.listContactRequests, "listContactRequests")({ page, pageSize, sentStatus: sent_status });
-
-    return {
-      received: (response.received ?? []).map((r) => ({
-        id: r.id,
-        from_handle: r.from_handle,
-        from_name: r.from_name,
-        message: r.message,
-        status: r.status,
-      })),
-      sent: (response.sent ?? []).map((s) => ({
-        id: s.id,
-        to_handle: s.to_handle,
-        to_name: s.to_name,
-        message: s.message,
-        status: s.status,
-      })),
-      metadata: response.metadata,
-    };
-  },
-};
-
-// =============================================================================
-// Tool: thenvoi_respond_contact_request
-// =============================================================================
-
-const respondContactRequestTool: McpTool = {
-  name: "thenvoi_respond_contact_request",
-  description:
-    "Respond to a contact request. " +
-    "Actions: 'approve'/'reject' for requests you RECEIVED, " +
-    "'cancel' for requests you SENT.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      action: {
-        type: "string",
-        description: "Action to take",
-        enum: ["approve", "reject", "cancel"],
-      },
-      handle: {
-        type: "string",
-        description: "Other party's handle",
-      },
-      request_id: {
-        type: "string",
-        description: "Or request ID (UUID)",
-      },
-    },
-    required: ["action"],
-  },
-  handler: async (params: unknown) => {
-    const { action, handle, request_id } = params as RespondContactRequestParams;
-    const rest = getRest();
-
-    if (!handle && !request_id) {
-      throw new Error("Either handle or request_id is required");
-    }
-
-    const respondArgs = handle
-      ? { action, target: "handle" as const, handle }
-      : { action, target: "requestId" as const, requestId: request_id! };
-
-    const response = await requireMethod(rest, rest.respondContactRequest, "respondContactRequest")(respondArgs);
-
-    return {
-      success: true,
-      ...response,
-    };
-  },
-};
-
-// =============================================================================
-// Export All Tools
-// =============================================================================
-
-export const mcpTools: McpTool[] = [
-  lookupPeersTool,
-  addParticipantTool,
-  removeParticipantTool,
-  getParticipantsTool,
-  createChatTool,
-  sendEventTool,
-  sendMessageTool,
-  // Contact tools
-  listContactsTool,
-  addContactTool,
-  removeContactTool,
-  listContactRequestsTool,
-  respondContactRequestTool,
-];
+}));
 
 /**
  * Get a tool by name.
@@ -746,7 +110,7 @@ export async function executeMcpTool(
 export function getMcpToolSchemas(): Array<{
   name: string;
   description: string;
-  inputSchema: McpInputSchema;
+  inputSchema: McpToolInputSchema;
 }> {
   return mcpTools.map((tool) => ({
     name: tool.name,
