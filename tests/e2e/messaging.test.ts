@@ -15,6 +15,11 @@ import {
   E2E_SKIP_MESSAGE,
   waitFor,
   testId,
+  getAgentMe,
+  lookupPeers,
+  createChat,
+  addParticipant,
+  sendMessage,
 } from "./setup.js";
 import type { E2EConfig } from "./setup.js";
 
@@ -61,31 +66,26 @@ describe("E2E: Messaging", () => {
     it.skipIf(!canRunE2E())(
       "should send a text message to a room",
       async () => {
-        // First we need a room - create one
-        const room = await link.rest.createChat();
+        // Use direct API helpers — SDK Fern client doesn't support these endpoints yet
+        const room = await createChat(config);
         expect(room.id).toBeTruthy();
 
-        // Get agent metadata and find another peer to mention
-        // (API requires at least 1 mention and you can't mention yourself)
-        const agent = await link.rest.getAgentMe();
-        const peers = await link.rest.listPeers!({ page: 1, pageSize: 10, notInChat: "" });
-        const otherPeer = peers.data.find((p) => p.id !== agent.id);
+        const agent = await getAgentMe(config);
+        const { peers } = await lookupPeers(config, 1, 10);
+        const otherPeer = peers.find((p) => p.id !== agent.id);
 
         if (!otherPeer) {
           console.log("No other peers available to test sendMessage");
           return;
         }
 
-        // Add the peer to the room first (pass ID, not name)
-        await link.rest.addChatParticipant(room.id, { participantId: otherPeer.id!, role: "member" });
+        await addParticipant(config, room.id, otherPeer.id, "member");
 
-        // Send a message mentioning the other participant
-        const result = await link.rest.createChatMessage(
+        const result = await sendMessage(
+          config,
           room.id,
-          {
-            content: `E2E test message ${testId()}`,
-            mentions: [{ id: otherPeer.id!, name: otherPeer.name }],
-          },
+          `E2E test message ${testId()}`,
+          [{ id: otherPeer.id, name: otherPeer.name }],
         );
 
         expect(result).toBeDefined();
@@ -95,27 +95,24 @@ describe("E2E: Messaging", () => {
     it.skipIf(!canRunE2E())(
       "should send a message with mentions",
       async () => {
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
-        // Get another peer to mention (can't mention self)
-        const agent = await link.rest.getAgentMe();
-        const peers = await link.rest.listPeers!({ page: 1, pageSize: 10, notInChat: "" });
-        const otherPeer = peers.data.find((p) => p.id !== agent.id);
+        const agent = await getAgentMe(config);
+        const { peers } = await lookupPeers(config, 1, 10);
+        const otherPeer = peers.find((p) => p.id !== agent.id);
 
         if (!otherPeer) {
           console.log("No other peers available to test mentions");
           return;
         }
 
-        // Add the peer to the room (pass ID, not name)
-        await link.rest.addChatParticipant(room.id, { participantId: otherPeer.id!, role: "member" });
+        await addParticipant(config, room.id, otherPeer.id, "member");
 
-        const result = await link.rest.createChatMessage(
+        const result = await sendMessage(
+          config,
           room.id,
-          {
-            content: `Hello @${otherPeer.name}!`,
-            mentions: [{ id: otherPeer.id!, name: otherPeer.name }],
-          },
+          `Hello @${otherPeer.name}!`,
+          [{ id: otherPeer.id, name: otherPeer.name }],
         );
 
         expect(result).toBeDefined();
@@ -125,7 +122,7 @@ describe("E2E: Messaging", () => {
     it.skipIf(!canRunE2E())(
       "should send an event (thought) message",
       async () => {
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         const result = await link.rest.createChatEvent(
           room.id,
@@ -179,7 +176,7 @@ describe("E2E: Messaging", () => {
         await presence.start();
 
         // Create a room (this should trigger room_added and auto-join)
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         // Wait for room to be joined
         await waitFor(() => roomJoined || presence!.rooms.has(room.id), 5000);
@@ -227,7 +224,7 @@ describe("E2E: Messaging", () => {
       "should fetch next message from backlog API",
       async () => {
         // Create a room first so we have a valid chatId
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         // This tests the REST API directly
         const message = await link.rest.getNextMessage!({ chatId: room.id });
@@ -248,7 +245,7 @@ describe("E2E: Messaging", () => {
       "should mark message as processed",
       async () => {
         // Create a room first so we have a valid chatId
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         // Get a message from backlog (if any)
         const message = await link.rest.getNextMessage!({ chatId: room.id });

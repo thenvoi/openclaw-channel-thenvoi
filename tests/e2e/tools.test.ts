@@ -2,8 +2,7 @@
  * E2E Tests: MCP Tools (via ThenvoiLink REST API)
  *
  * Tests the underlying API calls that power the MCP tools.
- * These tests call ThenvoiLink.rest directly since MCP tools
- * require the channel to be initialized.
+ * Uses direct API helpers for endpoints not yet supported by the SDK's Fern client.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -12,7 +11,10 @@ import {
   getE2EConfig,
   canRunE2E,
   E2E_SKIP_MESSAGE,
-  testId,
+  getAgentMe,
+  lookupPeers,
+  createChat,
+  addParticipant,
 } from "./setup.js";
 import type { E2EConfig } from "./setup.js";
 
@@ -36,22 +38,19 @@ describe("E2E: MCP Tools (API)", () => {
 
   afterAll(async () => {
     // Cleanup: We don't have a delete room API, so rooms will persist
-    // In a real test environment, you'd clean up test data
   });
 
   describe("thenvoi_lookup_peers", () => {
     it.skipIf(!canRunE2E())(
       "should return list of peers",
       async () => {
-        const result = await link.rest.listPeers!({ page: 1, pageSize: 10, notInChat: "" });
+        const result = await lookupPeers(config, 1, 10);
 
         expect(result).toBeDefined();
-        expect(result.data).toBeInstanceOf(Array);
-        expect(result.metadata).toBeDefined();
+        expect(result.peers).toBeInstanceOf(Array);
 
-        // If there are peers, check their structure
-        if (result.data.length > 0) {
-          const peer = result.data[0];
+        if (result.peers.length > 0) {
+          const peer = result.peers[0];
           expect(peer.id).toBeTruthy();
           expect(peer.name).toBeTruthy();
           expect(["User", "Agent", "System"]).toContain(peer.type);
@@ -62,15 +61,14 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should support pagination",
       async () => {
-        const page1 = await link.rest.listPeers!({ page: 1, pageSize: 5, notInChat: "" });
-        const page2 = await link.rest.listPeers!({ page: 2, pageSize: 5, notInChat: "" });
+        const page1 = await lookupPeers(config, 1, 5);
+        const page2 = await lookupPeers(config, 2, 5);
 
         expect(page1.metadata).toBeDefined();
         expect(page2.metadata).toBeDefined();
 
-        // If there are enough peers, pages should be different
-        if (page2.data.length > 0) {
-          expect(page1.data[0]?.id).not.toBe(page2.data[0]?.id);
+        if (page2.peers.length > 0) {
+          expect(page1.peers[0]?.id).not.toBe(page2.peers[0]?.id);
         }
       },
     );
@@ -80,12 +78,11 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should create a new chatroom",
       async () => {
-        const result = await link.rest.createChat();
+        const result = await createChat(config);
 
         expect(result).toBeDefined();
         expect(result.id).toBeTruthy();
 
-        // Save for later tests
         testRoomId = result.id;
       },
     );
@@ -93,7 +90,7 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should create chatroom without task_id",
       async () => {
-        const result = await link.rest.createChat();
+        const result = await createChat(config);
 
         expect(result).toBeDefined();
         expect(result.id).toBeTruthy();
@@ -105,9 +102,8 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should get participants in a room",
       async () => {
-        // Create a room first if we don't have one
         if (!testRoomId) {
-          const room = await link.rest.createChat();
+          const room = await createChat(config);
           testRoomId = room.id;
         }
 
@@ -115,7 +111,6 @@ describe("E2E: MCP Tools (API)", () => {
 
         expect(participants).toBeInstanceOf(Array);
 
-        // The creating agent should be a participant
         if (participants.length > 0) {
           const participant = participants[0];
           expect(participant.id).toBeTruthy();
@@ -129,25 +124,16 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should add a participant to a room",
       async () => {
-        // Create a fresh room for this test
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
-        // Get a peer to add (from lookup)
-        const peers = await link.rest.listPeers!({ page: 1, pageSize: 10, notInChat: "" });
-
-        // Find a peer that's not us
-        const agent = await link.rest.getAgentMe();
-        const otherPeer = peers.data.find((p) => p.id !== agent.id);
+        const { peers } = await lookupPeers(config, 1, 10);
+        const agent = await getAgentMe(config);
+        const otherPeer = peers.find((p) => p.id !== agent.id);
 
         if (otherPeer) {
-          const result = await link.rest.addChatParticipant(
-            room.id,
-            { participantId: otherPeer.id!, role: "member" },
-          );
-
+          const result = await addParticipant(config, room.id, otherPeer.id, "member");
           expect(result).toBeDefined();
         } else {
-          // No other peers available, skip this specific assertion
           console.log("No other peers available to test add_participant");
         }
       },
@@ -158,22 +144,17 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should remove a participant from a room",
       async () => {
-        // Create a room and add a participant
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
-        // Get peers and add one
-        const peers = await link.rest.listPeers!({ page: 1, pageSize: 10, notInChat: "" });
-        const agent = await link.rest.getAgentMe();
-        const otherPeer = peers.data.find((p) => p.id !== agent.id);
+        const { peers } = await lookupPeers(config, 1, 10);
+        const agent = await getAgentMe(config);
+        const otherPeer = peers.find((p) => p.id !== agent.id);
 
         if (otherPeer) {
-          // Add participant
-          await link.rest.addChatParticipant(room.id, { participantId: otherPeer.id!, role: "member" });
+          await addParticipant(config, room.id, otherPeer.id, "member");
 
-          // Remove participant
-          await link.rest.removeChatParticipant(room.id, otherPeer.id!);
+          await link.rest.removeChatParticipant(room.id, otherPeer.id);
 
-          // Verify they're gone
           const participants = await link.rest.listChatParticipants(room.id);
           const stillThere = participants.find((p) => p.name === otherPeer.name);
           expect(stillThere).toBeUndefined();
@@ -188,7 +169,7 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should send a thought event",
       async () => {
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         const result = await link.rest.createChatEvent(
           room.id,
@@ -205,7 +186,7 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should send an error event",
       async () => {
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         const result = await link.rest.createChatEvent(
           room.id,
@@ -222,7 +203,7 @@ describe("E2E: MCP Tools (API)", () => {
     it.skipIf(!canRunE2E())(
       "should send a task event",
       async () => {
-        const room = await link.rest.createChat();
+        const room = await createChat(config);
 
         const result = await link.rest.createChatEvent(
           room.id,

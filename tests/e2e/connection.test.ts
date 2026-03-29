@@ -13,6 +13,7 @@ import {
   canRunE2E,
   E2E_SKIP_MESSAGE,
   waitFor,
+  getAgentMe,
 } from "./setup.js";
 import type { E2EConfig } from "./setup.js";
 
@@ -43,13 +44,8 @@ describe("E2E: Connection", () => {
     it.skipIf(!canRunE2E())(
       "should authenticate and get agent metadata",
       async () => {
-        link = new ThenvoiLink({
-          agentId: config.agentId,
-          apiKey: config.apiKey,
-          wsUrl: config.wsUrl,
-          restUrl: config.restUrl,
-        });
-        const agent = await link.rest.getAgentMe();
+        // Use direct API call — SDK's Fern client doesn't support agent/me yet
+        const agent = await getAgentMe(config);
 
         expect(agent).toBeDefined();
         expect(agent.id).toBe(config.agentId);
