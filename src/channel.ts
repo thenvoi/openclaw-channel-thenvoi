@@ -738,9 +738,9 @@ export const thenvoiChannel: OpenClawChannel = {
                         await Promise.allSettled(pendingReplies);
                         if (deliveryErrors.length > 0) {
                           const summary = deliveryErrors.map((e) => e.message).join("; ");
-                          console.error(
-                            `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`,
-                          );
+                          const errorMsg = `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`;
+                          console.error(errorMsg);
+                          throw new AggregateError(deliveryErrors, errorMsg);
                         }
                       },
                       getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
