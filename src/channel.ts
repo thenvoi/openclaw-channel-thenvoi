@@ -837,8 +837,8 @@ export const thenvoiChannel: OpenClawChannel = {
             if (roomId && messageId) {
               try {
                 await link.markProcessed(roomId, messageId, { bestEffort: true });
-              } catch {
-                // Best effort - don't fail if marking fails
+              } catch (markErr) {
+                console.warn(`[thenvoi:${accountId}] Failed to mark message ${messageId} as processed:`, markErr);
               }
             }
           }
@@ -909,6 +909,72 @@ export const thenvoiChannel: OpenClawChannel = {
         await presence.start();
 
         console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
+
+        // Hydrate: drain pending (unprocessed) messages for each joined room.
+        // RoomPresence only handles live WebSocket events — messages sent while
+        // the agent was offline are sitting in the queue and must be polled via
+        // getNextMessage. This mirrors the old runtime.ts recovery logic.
+        if (presence.onRoomEvent) {
+          const roomHandler = presence.onRoomEvent;
+          const joinedRooms = [...registry().roomToAccount.entries()]
+            .filter(([, acct]) => acct === accountId)
+            .map(([roomId]) => roomId);
+
+          for (const roomId of joinedRooms) {
+            try {
+              let drained = 0;
+              const seenIds = new Set<string>();
+              const MAX_HYDRATE = 50; // Safety cap to prevent infinite loops
+              while (drained < MAX_HYDRATE) {
+                const message = await link.getNextMessage(roomId);
+                if (!message) break;
+
+                const m = message as unknown as Record<string, unknown>;
+                const msgId = String(m.id ?? "");
+
+                // If we've seen this message before, markProcessed isn't working — break to avoid infinite loop
+                if (seenIds.has(msgId)) {
+                  console.warn(`[thenvoi:${accountId}] Hydration: message ${msgId} returned again after marking, stopping`);
+                  break;
+                }
+                seenIds.add(msgId);
+
+                console.log(`[thenvoi:${accountId}] Hydrating pending message in room ${roomId} (id=${msgId})`);
+
+                // Convert PlatformMessageLike → PlatformEvent for the room handler
+                const syntheticEvent = {
+                  type: "message_created",
+                  roomId,
+                  payload: {
+                    id: msgId,
+                    chat_room_id: roomId,
+                    content: String(m.content ?? ""),
+                    sender_id: String(m.senderId ?? ""),
+                    sender_type: String(m.senderType ?? "User"),
+                    sender_name: m.senderName != null ? String(m.senderName) : undefined,
+                    message_type: String(m.messageType ?? "text"),
+                    inserted_at: m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt ?? new Date().toISOString()),
+                    metadata: (m.metadata ?? {}) as Record<string, unknown>,
+                  },
+                };
+                await roomHandler(roomId, syntheticEvent as PlatformEvent);
+                drained++;
+              }
+              if (drained > 0) {
+                console.log(`[thenvoi:${accountId}] Hydrated ${drained} pending message(s) in room ${roomId}`);
+              }
+            } catch (error) {
+              // getNextMessage may throw UnsupportedFeatureError if the REST
+              // adapter doesn't support message queues — that's fine, skip hydration.
+              const msg = error instanceof Error ? error.message : String(error);
+              if (msg.includes("UnsupportedFeature") || msg.includes("not available")) {
+                console.log(`[thenvoi:${accountId}] Message hydration not available, skipping`);
+              } else {
+                console.error(`[thenvoi:${accountId}] Failed to hydrate room ${roomId}:`, error);
+              }
+            }
+          }
+        }
 
         // Block until OpenClaw signals shutdown — startAccount must stay
         // alive for the lifetime of the connection, otherwise OpenClaw
