@@ -20,7 +20,7 @@ import * as channel from "../../src/channel.js";
 
 // Mock the channel module
 vi.mock("../../src/channel.js", () => ({
-  getLink: vi.fn(),
+  getLinkForRoom: vi.fn(),
   getAgentId: vi.fn(),
 }));
 
@@ -49,7 +49,7 @@ const mockLink = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(channel.getLink).mockReturnValue(mockLink as unknown as ReturnType<typeof channel.getLink>);
+  vi.mocked(channel.getLinkForRoom).mockReturnValue(mockLink as unknown as ReturnType<typeof channel.getLinkForRoom>);
   vi.mocked(channel.getAgentId).mockReturnValue("agent-123");
 });
 
@@ -356,7 +356,7 @@ describe("MCP Tools", () => {
 
   describe("error handling", () => {
     it("should throw when link not connected", async () => {
-      vi.mocked(channel.getLink).mockReturnValue(undefined);
+      vi.mocked(channel.getLinkForRoom).mockReturnValue(undefined);
 
       await expect(
         executeMcpTool("thenvoi_lookup_peers", { room_id: "room-001" }),

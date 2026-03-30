@@ -214,6 +214,7 @@ const GATEWAY_REGISTRY_KEY = `__thenvoi_gateway_registry_v${PKG_VERSION}__`;
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;
   presences: Map<string, RoomPresence>;
+  roomToAccount: Map<string, string>;
   startingAccounts: Set<string>;
   lastSenderByThread: Map<string, { senderId: string; senderName: string }>;
   deliverInbound: ((message: OpenClawInboundMessage) => void) | null;
@@ -226,6 +227,7 @@ function getGatewayRegistry(): GatewayRegistry {
     g[GATEWAY_REGISTRY_KEY] = {
       links: new Map(),
       presences: new Map(),
+      roomToAccount: new Map(),
       startingAccounts: new Set(),
       lastSenderByThread: new Map(),
       deliverInbound: null,
@@ -672,10 +674,12 @@ export const thenvoiChannel: OpenClawChannel = {
         // Set up room event handlers
         presence.onRoomJoined = async (roomId: string, payload: Record<string, unknown>) => {
           const title = (payload.title as string) ?? roomId;
+          registry().roomToAccount.set(roomId, accountId);
           console.log(`[thenvoi:${accountId}] Joined room: ${title} (${roomId})`);
         };
 
         presence.onRoomLeft = async (roomId: string) => {
+          registry().roomToAccount.delete(roomId);
           console.log(`[thenvoi:${accountId}] Left room: ${roomId}`);
         };
 
@@ -683,7 +687,10 @@ export const thenvoiChannel: OpenClawChannel = {
         presence.onRoomEvent = async (_roomId: string, event: PlatformEvent) => {
           // Invalidate participant cache when membership changes
           if (event.type === "participant_added" || event.type === "participant_removed") {
-            const roomId = event.roomId ?? (event.payload as Record<string, unknown>).chat_room_id as string | undefined;
+            const fallbackId = event.payload != null && typeof event.payload === "object" && "chat_room_id" in event.payload
+              ? String((event.payload as Record<string, unknown>).chat_room_id)
+              : undefined;
+            const roomId = event.roomId ?? fallbackId;
             if (roomId) participantCache.delete(roomId);
             return;
           }
@@ -913,6 +920,15 @@ export function registerChannel(api: OpenClawChannelApi): void {
  * Get the ThenvoiLink for an account.
  */
 export function getLink(accountId: string = "default"): ThenvoiLink | undefined {
+  return links().get(accountId);
+}
+
+/**
+ * Get the ThenvoiLink that owns a given room.
+ * Falls back to the "default" account if the room isn't mapped.
+ */
+export function getLinkForRoom(roomId: string): ThenvoiLink | undefined {
+  const accountId = registry().roomToAccount.get(roomId) ?? "default";
   return links().get(accountId);
 }
 

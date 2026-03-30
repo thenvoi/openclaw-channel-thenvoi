@@ -10,7 +10,7 @@
 import { AgentTools } from "@thenvoi/sdk/runtime";
 import { buildRoomScopedRegistrations } from "@thenvoi/sdk/mcp";
 import type { McpToolRegistration, McpToolInputSchema, McpToolResult } from "@thenvoi/sdk/mcp";
-import { getLink } from "./channel.js";
+import { getLinkForRoom } from "./channel.js";
 
 // =============================================================================
 // Tool Resolution
@@ -21,7 +21,7 @@ import { getLink } from "./channel.js";
  * Called by the SDK's room-scoped registration builder on each tool invocation.
  */
 function resolveToolsForRoom(roomId: string) {
-  const link = getLink();
+  const link = getLinkForRoom(roomId);
   if (!link) {
     return undefined;
   }

@@ -76,30 +76,36 @@ export default function plugin(api: OpenClawPluginApi): void {
     const registerTool = api.registerTool;
     const toolSchemas = getMcpToolSchemas();
     console.log(`[thenvoi] Registering ${toolSchemas.length} tools:`, toolSchemas.map(t => t.name));
+    let registered = 0;
     for (const tool of toolSchemas) {
-      registerTool({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-        execute: async (_toolCallId: unknown, input: unknown) => {
-          console.log(`[thenvoi] Executing tool ${tool.name}`);
-          try {
-            const result = await executeMcpTool(tool.name, input ?? {});
-            const resultStr = JSON.stringify(result, null, 2);
-            console.log(`[thenvoi] Tool ${tool.name} completed`);
+      try {
+        registerTool({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+          execute: async (_toolCallId: unknown, input: unknown) => {
+            console.log(`[thenvoi] Executing tool ${tool.name}`);
+            try {
+              const result = await executeMcpTool(tool.name, input ?? {});
+              const resultStr = JSON.stringify(result, null, 2);
+              console.log(`[thenvoi] Tool ${tool.name} completed`);
 
-            return {
-              content: [{ type: "text", text: resultStr }],
-              details: result,
-            };
-          } catch (error) {
-            console.error(`[thenvoi] Tool ${tool.name} error:`, error);
-            throw error;
-          }
-        },
-      });
+              return {
+                content: [{ type: "text", text: resultStr }],
+                details: result,
+              };
+            } catch (error) {
+              console.error(`[thenvoi] Tool ${tool.name} error:`, error);
+              throw error;
+            }
+          },
+        });
+        registered++;
+      } catch (error) {
+        console.error(`[thenvoi] Failed to register tool ${tool.name}:`, error);
+      }
     }
-    console.log("[thenvoi] Tools registered successfully");
+    console.log(`[thenvoi] ${registered}/${toolSchemas.length} tools registered`);
   } else {
     console.warn("[thenvoi] WARNING: api.registerTool is not available - tools will NOT be registered!");
     console.warn("[thenvoi] Available API methods:", Object.keys(api));
@@ -137,7 +143,7 @@ export default function plugin(api: OpenClawPluginApi): void {
 
 // Channel exports
 export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } from "./channel.js";
-export { getLink, getAgentId, resetGatewayRegistry } from "./channel.js";
+export { getLink, getLinkForRoom, getAgentId, resetGatewayRegistry } from "./channel.js";
 
 // OpenClaw-specific type exports
 export type { ThenvoiAccountConfig, OpenClawInboundMessage } from "./channel.js";
