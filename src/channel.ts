@@ -356,7 +356,9 @@ function resolveConfig(account: ThenvoiAccountConfig): { apiKey: string; agentId
     throw new Error("THENVOI_AGENT_ID is required");
   }
 
-  return { apiKey, agentId, wsUrl, restUrl };
+  // apiKey and agentId are guaranteed non-empty after the checks above,
+  // but ?? narrows to `string | undefined` — assert for the return type.
+  return { apiKey: apiKey as string, agentId: agentId as string, wsUrl, restUrl };
 }
 
 // =============================================================================
@@ -679,6 +681,13 @@ export const thenvoiChannel: OpenClawChannel = {
 
         // Handle room events (messages, participant changes)
         presence.onRoomEvent = async (_roomId: string, event: PlatformEvent) => {
+          // Invalidate participant cache when membership changes
+          if (event.type === "participant_added" || event.type === "participant_removed") {
+            const roomId = event.roomId ?? (event.payload as Record<string, unknown>).chat_room_id as string | undefined;
+            if (roomId) participantCache.delete(roomId);
+            return;
+          }
+
           // Only process message_created events
           if (event.type !== "message_created") return;
 
@@ -749,12 +758,9 @@ export const thenvoiChannel: OpenClawChannel = {
                     }
 
                     return {
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      sendToolResult: (payload: any): boolean => { enqueueReply(payload); return true; },
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      sendBlockReply: (payload: any): boolean => { enqueueReply(payload); return true; },
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      sendFinalReply: (payload: any): boolean => { enqueueReply(payload); return true; },
+                      sendToolResult: (payload: unknown): boolean => { enqueueReply(payload); return true; },
+                      sendBlockReply: (payload: unknown): boolean => { enqueueReply(payload); return true; },
+                      sendFinalReply: (payload: unknown): boolean => { enqueueReply(payload); return true; },
                       waitForIdle: async (): Promise<void> => {
                         await Promise.allSettled(pendingReplies);
                         if (deliveryErrors.length > 0) {
