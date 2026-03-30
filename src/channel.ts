@@ -213,6 +213,13 @@ function resolvePackageVersion(): string {
 }
 const PKG_VERSION: string = resolvePackageVersion();
 const GATEWAY_REGISTRY_KEY = `__thenvoi_gateway_registry_v${PKG_VERSION}__`;
+interface SyncState {
+  isSyncing: boolean;
+  syncPointMessageId: string | null;
+  pendingWsEvents: Array<{ roomId: string; event: PlatformEvent }>;
+  processedMessageIds: Set<string>;
+}
+
 interface GatewayRegistry {
   links: Map<string, ThenvoiLink>;
   presences: Map<string, RoomPresence>;
@@ -220,6 +227,7 @@ interface GatewayRegistry {
   startingAccounts: Set<string>;
   lastSenderByThread: Map<string, { senderId: string; senderName: string }>;
   participantCache: Map<string, { participants: Array<{ id: string; name: string }>; expiresAt: number }>;
+  syncStates: Map<string, SyncState>; // accountId → sync state
   deliverInbound: ((message: OpenClawInboundMessage) => void) | null;
   openclawRuntime: OpenClawRuntimeRef | null;
 }
@@ -234,6 +242,7 @@ function getGatewayRegistry(): GatewayRegistry {
       startingAccounts: new Set(),
       lastSenderByThread: new Map(),
       participantCache: new Map(),
+      syncStates: new Map(),
       deliverInbound: null,
       openclawRuntime: null,
     };
@@ -256,6 +265,21 @@ export function resetGatewayRegistry(): void {
 function registry() { return getGatewayRegistry(); }
 function links() { return getGatewayRegistry().links; }
 function presences() { return getGatewayRegistry().presences; }
+
+function getSyncState(accountId: string): SyncState {
+  const states = registry().syncStates;
+  let state = states.get(accountId);
+  if (!state) {
+    state = {
+      isSyncing: false,
+      syncPointMessageId: null,
+      pendingWsEvents: [],
+      processedMessageIds: new Set(),
+    };
+    states.set(accountId, state);
+  }
+  return state;
+}
 
 // Track last sender per thread for auto-mention fallback
 // Key: threadId, Value: { senderId, senderName }
@@ -750,9 +774,42 @@ export const thenvoiChannel: OpenClawChannel = {
           // Only process message_created events
           if (event.type !== "message_created") return;
 
+          const sync = getSyncState(accountId);
+
+          // Capture sync point: the first WS message_created received after connect.
+          // The backlog drain will stop when it reaches this message ID.
+          if (sync.syncPointMessageId === null && event.payload.id) {
+            sync.syncPointMessageId = event.payload.id;
+            console.log(`[thenvoi:${accountId}] Sync point set to message ${event.payload.id}`);
+          }
+
+          // During sync, queue WS events instead of processing them —
+          // the backlog drain will handle messages up to the sync point,
+          // and queued events will be flushed after sync completes.
+          if (sync.isSyncing) {
+            const roomId = event.roomId ?? event.payload.chat_room_id;
+            if (roomId) {
+              sync.pendingWsEvents.push({ roomId, event });
+            }
+            return;
+          }
+
+          // After sync: skip messages already processed during backlog drain
+          if (sync.processedMessageIds.has(event.payload.id)) {
+            return;
+          }
+
           // Skip messages from our own agent or other agents (prevent bot loops)
           if (event.payload.sender_id === config.agentId) return;
           if (event.payload.sender_type === "Agent") return;
+
+          // Skip messages not mentioning this agent — the platform may deliver
+          // all room messages via getNextMessage, but each agent should only
+          // respond to messages that @mention them.
+          const mentions = event.payload.metadata?.mentions as Array<{ id: string }> | undefined;
+          if (mentions && mentions.length > 0 && !mentions.some((m) => m.id === config.agentId)) {
+            return;
+          }
 
           const message = platformEventToInboundMessage(event);
           if (!message) return;
@@ -779,32 +836,18 @@ export const thenvoiChannel: OpenClawChannel = {
               const dispatcher = isContactThread
                 ? createNoopDispatcher()
                 : (() => {
-                    // Track pending reply promises so waitForIdle can await them
-                    const pendingReplies: Promise<void>[] = [];
-                    const deliveryErrors: Error[] = [];
-
-                    function enqueueReply(payload: unknown): void {
-                      pendingReplies.push(
-                        sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, payload).catch((err: unknown) => {
-                          const error = err instanceof Error ? err : new Error(String(err));
-                          deliveryErrors.push(error);
-                          console.error(`[thenvoi:${accountId}] Reply delivery failed (room=${threadId}):`, error.message);
-                        }),
-                      );
-                    }
+                    // Buffer all reply payloads — OpenClaw may call sendFinalReply
+                    // multiple times per turn (one per text block). We only send the
+                    // last one to Thenvoi so the user sees a single message.
+                    let lastFinalPayload: unknown = null;
 
                     return {
-                      sendToolResult: (payload: unknown): boolean => { enqueueReply(payload); return true; },
-                      sendBlockReply: (payload: unknown): boolean => { enqueueReply(payload); return true; },
-                      sendFinalReply: (payload: unknown): boolean => { enqueueReply(payload); return true; },
+                      sendToolResult: (): boolean => true,
+                      sendBlockReply: (): boolean => true,
+                      sendFinalReply: (payload: unknown): boolean => { lastFinalPayload = payload; return true; },
                       waitForIdle: async (): Promise<void> => {
-                        await Promise.allSettled(pendingReplies);
-                        if (deliveryErrors.length > 0) {
-                          const summary = deliveryErrors.map((e) => e.message).join("; ");
-                          const errorMsg = `[thenvoi:${accountId}] ${deliveryErrors.length}/${pendingReplies.length} replies failed to deliver (room=${message.threadId}): ${summary}`;
-                          console.error(errorMsg);
-                          throw new AggregateError(deliveryErrors, errorMsg);
-                        }
+                        if (lastFinalPayload == null) return;
+                        await sendReplyToThenvoi(link.rest, config.agentId, accountId, threadId, lastFinalPayload);
                       },
                       getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
                     };
@@ -837,7 +880,9 @@ export const thenvoiChannel: OpenClawChannel = {
             const roomId = event.roomId ?? event.payload.chat_room_id;
             if (roomId && messageId) {
               try {
-                await link.markProcessed(roomId, messageId, { bestEffort: true });
+                await link.markProcessing(roomId, messageId);
+                await link.markProcessed(roomId, messageId);
+                console.log(`[thenvoi:${accountId}] Marked message ${messageId} as processed`);
               } catch (markErr) {
                 console.warn(`[thenvoi:${accountId}] Failed to mark message ${messageId} as processed:`, markErr);
               }
@@ -911,89 +956,172 @@ export const thenvoiChannel: OpenClawChannel = {
 
         console.log(`[thenvoi:${accountId}] Connected to Thenvoi platform`);
 
-        // Hydrate: drain pending (unprocessed) messages for each joined room.
-        // RoomPresence only handles live WebSocket events — messages sent while
-        // the agent was offline are sitting in the queue and must be polled via
-        // getNextMessage. This mirrors the old runtime.ts recovery logic.
-        if (presence.onRoomEvent) {
-          const roomHandler = presence.onRoomEvent;
+        // Synchronize with message backlog using the sync point pattern.
+        //
+        // RoomPresence only handles live WebSocket events. Messages sent while
+        // the agent was offline sit in the message queue and must be polled via
+        // getNextMessage(). The sync point (first WS message ID, captured in
+        // onRoomEvent above) tells us where the backlog ends and live events
+        // begin. After draining, we flush any WS events that arrived during
+        // sync and dedup against processedMessageIds.
+        {
+          const sync = getSyncState(accountId);
+          sync.isSyncing = true;
+          sync.processedMessageIds.clear();
+          sync.pendingWsEvents = [];
+          // syncPointMessageId may already be set if a WS event arrived before we get here
+
+          const roomHandler = presence.onRoomEvent!;
           const joinedRooms = [...registry().roomToAccount.entries()]
             .filter(([, acct]) => acct === accountId)
             .map(([roomId]) => roomId);
 
+          console.log(`[thenvoi:${accountId}] Starting backlog sync for ${joinedRooms.length} room(s)...`);
+
           for (const roomId of joinedRooms) {
             try {
-              let drained = 0;
+              // Phase 1: Collect all eligible backlog messages for this room
+              interface BacklogMsg { id: string; content: string; senderId: string; senderName: string; senderType: string; timestamp: string }
+              const collected: BacklogMsg[] = [];
+              let skipped = 0;
               const seenIds = new Set<string>();
-              const MAX_HYDRATE = 50; // Safety cap to prevent infinite loops
-              while (drained < MAX_HYDRATE) {
+              const MAX_DRAIN = 100;
+
+              while (collected.length + skipped < MAX_DRAIN) {
                 const message = await link.getNextMessage(roomId);
                 if (!message) break;
 
                 const m = message as unknown as Record<string, unknown>;
                 const msgId = String(m.id ?? "");
 
-                // If we've seen this message before, markProcessed isn't working — break to avoid infinite loop
+                // Infinite-loop guard
                 if (seenIds.has(msgId)) {
-                  console.warn(`[thenvoi:${accountId}] Hydration: message ${msgId} returned again after marking, stopping`);
+                  console.warn(`[thenvoi:${accountId}] Sync: message ${msgId} returned again, stopping room ${roomId}`);
                   break;
                 }
                 seenIds.add(msgId);
 
-                console.log(`[thenvoi:${accountId}] Hydrating pending message in room ${roomId} (id=${msgId})`);
+                const isSyncPoint = sync.syncPointMessageId !== null && msgId === sync.syncPointMessageId;
 
-                // Mark as processing first — moves message out of the "next" queue
-                // so getNextMessage advances to the next message on the next call.
+                // Mark as processing to advance the queue
                 try {
-                  await link.markProcessing(roomId, msgId, { bestEffort: true });
-                } catch {
-                  // Best effort — continue even if this fails
-                }
+                  await link.markProcessing(roomId, msgId);
+                } catch { /* best effort */ }
 
-                // Skip messages from other agents (prevent bot loops during hydration)
+                const senderId = String(m.senderId ?? "");
                 const senderType = String(m.senderType ?? "User");
-                if (senderType === "Agent" && String(m.senderId ?? "") !== config.agentId) {
-                  console.log(`[thenvoi:${accountId}] Hydration: skipping agent message ${msgId}`);
+                const msgMetadata = (m.metadata ?? {}) as Record<string, unknown>;
+                const msgMentions = msgMetadata.mentions as Array<{ id: string }> | undefined;
+                const notMentioned = msgMentions && msgMentions.length > 0 && !msgMentions.some((mention) => mention.id === config.agentId);
+                const shouldSkip =
+                  senderId === config.agentId ||
+                  senderType === "Agent" ||
+                  String(m.messageType ?? "text") !== "text" ||
+                  notMentioned;
+
+                if (shouldSkip) {
                   try {
-                    await link.markProcessed(roomId, msgId, { bestEffort: true });
-                  } catch { /* best effort */ }
-                  drained++;
+                    await link.markProcessing(roomId, msgId);
+                    await link.markProcessed(roomId, msgId);
+                  } catch { /* best effort for skipped messages */ }
+                  sync.processedMessageIds.add(msgId);
+                  skipped++;
+                  if (isSyncPoint) break;
                   continue;
                 }
 
-                // Convert PlatformMessageLike → PlatformEvent for the room handler
+                collected.push({
+                  id: msgId,
+                  content: String(m.content ?? ""),
+                  senderId,
+                  senderName: m.senderName != null ? String(m.senderName) : "Unknown",
+                  senderType,
+                  timestamp: m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt ?? new Date().toISOString()),
+                });
+                // Don't add to processedMessageIds yet — the handler checks this set
+                // for dedup, so we add after dispatch below.
+
+                if (isSyncPoint) break;
+              }
+
+              // Phase 2: Dispatch collected messages as a single combined event
+              if (collected.length > 0) {
+                // Use the last message as the base event (most recent sender gets the reply)
+                const last = collected[collected.length - 1]!;
+
+                // Combine multiple messages into one text block so the agent sees full context
+                let combinedContent: string;
+                if (collected.length === 1) {
+                  combinedContent = last.content;
+                } else {
+                  combinedContent = collected
+                    .map((msg) => `[${msg.senderName}]: ${msg.content}`)
+                    .join("\n");
+                }
+
+                console.log(`[thenvoi:${accountId}] Sync: dispatching ${collected.length} backlog message(s) as one in room ${roomId}`);
+
                 const syntheticEvent = {
                   type: "message_created",
                   roomId,
                   payload: {
-                    id: msgId,
+                    id: last.id,
                     chat_room_id: roomId,
-                    content: String(m.content ?? ""),
-                    sender_id: String(m.senderId ?? ""),
-                    sender_type: senderType,
-                    sender_name: m.senderName != null ? String(m.senderName) : undefined,
-                    message_type: String(m.messageType ?? "text"),
-                    inserted_at: m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt ?? new Date().toISOString()),
-                    metadata: (m.metadata ?? {}) as Record<string, unknown>,
+                    content: combinedContent,
+                    sender_id: last.senderId,
+                    sender_type: last.senderType,
+                    sender_name: last.senderName,
+                    message_type: "text",
+                    inserted_at: last.timestamp,
+                    metadata: { backlogMessageIds: collected.map((msg) => msg.id) } as Record<string, unknown>,
                   },
                 };
+
+                sync.isSyncing = false;
                 await roomHandler(roomId, syntheticEvent as PlatformEvent);
-                drained++;
+                sync.isSyncing = true;
+
+                // Now mark all collected messages as processed for WS dedup
+                for (const msg of collected) {
+                  sync.processedMessageIds.add(msg.id);
+                }
               }
-              if (drained > 0) {
-                console.log(`[thenvoi:${accountId}] Hydrated ${drained} pending message(s) in room ${roomId}`);
+
+              if (collected.length > 0 || skipped > 0) {
+                console.log(`[thenvoi:${accountId}] Sync complete for room ${roomId}: ${collected.length} processed, ${skipped} skipped`);
               }
             } catch (error) {
-              // getNextMessage may throw UnsupportedFeatureError if the REST
-              // adapter doesn't support message queues — that's fine, skip hydration.
               const msg = error instanceof Error ? error.message : String(error);
               if (msg.includes("UnsupportedFeature") || msg.includes("not available")) {
-                console.log(`[thenvoi:${accountId}] Message hydration not available, skipping`);
-              } else {
-                console.error(`[thenvoi:${accountId}] Failed to hydrate room ${roomId}:`, error);
+                console.log(`[thenvoi:${accountId}] Message sync not available (getNextMessage unsupported), skipping`);
+                break;
               }
+              console.error(`[thenvoi:${accountId}] Sync failed for room ${roomId}:`, error);
             }
           }
+
+          // Sync complete — flush queued WS events that arrived during drain
+          sync.isSyncing = false;
+          const pending = sync.pendingWsEvents;
+          sync.pendingWsEvents = [];
+
+          if (pending.length > 0) {
+            console.log(`[thenvoi:${accountId}] Flushing ${pending.length} queued WS event(s)`);
+            for (const { roomId: evRoomId, event } of pending) {
+              // Skip events already processed via REST backlog
+              if (event.payload?.id && sync.processedMessageIds.has(event.payload.id)) {
+                continue;
+              }
+              await roomHandler(evRoomId, event);
+            }
+          }
+
+          // Clear sync state (keep processedMessageIds briefly for late dedup)
+          sync.syncPointMessageId = null;
+          // Clear processedMessageIds after a short delay to catch any late WS duplicates
+          setTimeout(() => { sync.processedMessageIds.clear(); }, 10_000);
+
+          console.log(`[thenvoi:${accountId}] Backlog sync finished`);
         }
 
         // Block until OpenClaw signals shutdown — startAccount must stay

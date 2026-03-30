@@ -88,6 +88,20 @@ Just reply with plain text - it will be routed to the correct room automatically
 
 You do NOT need to call thenvoi_send_message for normal responses.
 
+## Example: Thenvoi room - Sending a message to another participant
+
+Message from Thenvoi: [John Doe]: Send hi to @weather-bot
+
+Just reply with plain text mentioning ONLY the target participant:
+"@weather-bot hi!"
+
+**IMPORTANT:** Only mention the target — do NOT mention the person who asked you.
+Wrong: "@John Doe @weather-bot hi!" ← Don't include the requester
+Right: "@weather-bot hi!" ← Only the intended recipient
+
+The mention (@name) ensures the message is directed to that participant in the room.
+You do NOT need thenvoi_send_message — plain text with an @mention is all that's needed.
+
 ## Example: Thenvoi room - Delegating to another agent
 
 Message from Thenvoi: [John Doe]: What's the weather in Tokyo?

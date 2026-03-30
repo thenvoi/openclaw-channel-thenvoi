@@ -25,6 +25,7 @@ vi.mock("@thenvoi/sdk", () => ({
       },
       connect: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
+      markProcessing: vi.fn().mockResolvedValue(undefined),
       markProcessed: vi.fn().mockResolvedValue(undefined),
     };
     return mockLinkInstance;
@@ -149,11 +150,14 @@ describe("SDK Message Flow Integration", () => {
       }),
     );
 
-    // 4c. Message was marked as processed
+    // 4c. Message was marked as processing then processed
+    expect(mockLinkInstance.markProcessing).toHaveBeenCalledWith(
+      "room-100",
+      "msg-inbound-001",
+    );
     expect(mockLinkInstance.markProcessed).toHaveBeenCalledWith(
       "room-100",
       "msg-inbound-001",
-      { bestEffort: true },
     );
   });
 
@@ -205,11 +209,14 @@ describe("SDK Message Flow Integration", () => {
       }),
     );
 
-    // Still marked as processed
+    // Still marked as processing then processed
+    expect(mockLinkInstance.markProcessing).toHaveBeenCalledWith(
+      "room-200",
+      "msg-002",
+    );
     expect(mockLinkInstance.markProcessed).toHaveBeenCalledWith(
       "room-200",
       "msg-002",
-      { bestEffort: true },
     );
   });
 });

@@ -22,6 +22,7 @@ vi.mock("@thenvoi/sdk", () => ({
       },
       connect: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
+      markProcessing: vi.fn().mockResolvedValue(undefined),
       markProcessed: vi.fn().mockResolvedValue(undefined),
     };
     return mockLinkInstance;
@@ -535,10 +536,13 @@ describe("Channel Gateway Lifecycle", () => {
         },
       });
 
+      expect(mockLinkInstance.markProcessing).toHaveBeenCalledWith(
+        "room-123",
+        "msg-001",
+      );
       expect(mockLinkInstance.markProcessed).toHaveBeenCalledWith(
         "room-123",
         "msg-001",
-        { bestEffort: true },
       );
     });
   });
