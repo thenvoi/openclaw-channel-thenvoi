@@ -827,10 +827,74 @@ export const thenvoiChannel: OpenClawChannel = {
           }
         };
 
-        // Create a singleton ContactEventHandler for this account
-        // (maintains dedup state, hub room ID, and request cache across events)
+        // Create a singleton ContactEventHandler for this account.
+        // Uses "callback" strategy to dispatch contact events directly to the
+        // OpenClaw agent as synthetic messages on the CONTACTS_THREAD_ID virtual
+        // thread (mirrors the old "direct" strategy that the SDK doesn't have).
+        //
+        // Note: the SDK's in-memory dedup (Set + LRU eviction) is ephemeral —
+        // contact events may be reprocessed after a restart.  The old
+        // ContactStateStore persisted dedup keys to disk, but the SDK doesn't
+        // support that.  In practice this is acceptable: reprocessed events are
+        // idempotent (approve/reject are no-ops on already-resolved requests).
         const contactHandler = new ContactEventHandler({
-          config: { strategy: "hub_room", broadcastChanges: true },
+          config: {
+            strategy: "callback",
+            broadcastChanges: true,
+            onEvent: async (event: ContactEvent) => {
+              const text = await contactHandler.formatEventMessage(event);
+              const now = new Date().toISOString();
+              const message: OpenClawInboundMessage = {
+                channelId: "thenvoi",
+                threadId: CONTACTS_THREAD_ID,
+                senderId: "contact-events",
+                senderType: "System",
+                senderName: "Contact Events",
+                text,
+                timestamp: now,
+                metadata: { contactEventType: event.type },
+              };
+
+              // Dispatch through the same path as regular messages
+              const rt = registry().openclawRuntime;
+              const dispatchFn = rt?.channel?.reply?.dispatchReplyFromConfig;
+              if (rt?.config && dispatchFn) {
+                const inboundCtx = {
+                  Body: message.text,
+                  RawBody: message.text,
+                  BodyForCommands: message.text,
+                  CommandBody: message.text,
+                  From: message.senderId,
+                  SenderId: message.senderId,
+                  SenderName: message.senderName,
+                  To: message.threadId,
+                  SessionKey: `thenvoi:${message.threadId}`,
+                  Surface: "thenvoi",
+                  Provider: "thenvoi",
+                  MessageSid: undefined,
+                  Timestamp: Date.now(),
+                  ChatType: "group",
+                  CommandAuthorized: true,
+                };
+
+                // Contact thread — no replies to send back to Thenvoi
+                const noopSend = (): boolean => true;
+                const dispatcher = {
+                  sendToolResult: noopSend,
+                  sendBlockReply: noopSend,
+                  sendFinalReply: noopSend,
+                  waitForIdle: async (): Promise<void> => {},
+                  getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
+                };
+
+                console.log(`[thenvoi:${accountId}] Dispatching contact event to OpenClaw agent: ${event.type}`);
+                const cfg = rt.config.loadConfig();
+                await dispatchFn({ ctx: inboundCtx, cfg, dispatcher });
+              } else {
+                deliverMessage(message, accountId);
+              }
+            },
+          },
           rest: link.rest,
           onBroadcast: (msg: string) => {
             console.log(`[thenvoi:${accountId}] Contact broadcast: ${msg}`);
