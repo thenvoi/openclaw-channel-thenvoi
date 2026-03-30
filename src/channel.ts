@@ -750,8 +750,9 @@ export const thenvoiChannel: OpenClawChannel = {
           // Only process message_created events
           if (event.type !== "message_created") return;
 
-          // Skip messages from our own agent
+          // Skip messages from our own agent or other agents (prevent bot loops)
           if (event.payload.sender_id === config.agentId) return;
+          if (event.payload.sender_type === "Agent") return;
 
           const message = platformEventToInboundMessage(event);
           if (!message) return;
@@ -941,6 +942,25 @@ export const thenvoiChannel: OpenClawChannel = {
 
                 console.log(`[thenvoi:${accountId}] Hydrating pending message in room ${roomId} (id=${msgId})`);
 
+                // Mark as processing first — moves message out of the "next" queue
+                // so getNextMessage advances to the next message on the next call.
+                try {
+                  await link.markProcessing(roomId, msgId, { bestEffort: true });
+                } catch {
+                  // Best effort — continue even if this fails
+                }
+
+                // Skip messages from other agents (prevent bot loops during hydration)
+                const senderType = String(m.senderType ?? "User");
+                if (senderType === "Agent" && String(m.senderId ?? "") !== config.agentId) {
+                  console.log(`[thenvoi:${accountId}] Hydration: skipping agent message ${msgId}`);
+                  try {
+                    await link.markProcessed(roomId, msgId, { bestEffort: true });
+                  } catch { /* best effort */ }
+                  drained++;
+                  continue;
+                }
+
                 // Convert PlatformMessageLike → PlatformEvent for the room handler
                 const syntheticEvent = {
                   type: "message_created",
@@ -950,7 +970,7 @@ export const thenvoiChannel: OpenClawChannel = {
                     chat_room_id: roomId,
                     content: String(m.content ?? ""),
                     sender_id: String(m.senderId ?? ""),
-                    sender_type: String(m.senderType ?? "User"),
+                    sender_type: senderType,
                     sender_name: m.senderName != null ? String(m.senderName) : undefined,
                     message_type: String(m.messageType ?? "text"),
                     inserted_at: m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt ?? new Date().toISOString()),
