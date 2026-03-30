@@ -373,6 +373,53 @@ describe("Channel Gateway Lifecycle", () => {
       expect(callback).not.toHaveBeenCalled();
     });
 
+    it("should invalidate participant cache on participant_added", async () => {
+      const ctx = createGatewayContext("default", mockAccountConfig, { aborted: true });
+      await thenvoiChannel.gateway!.startAccount(ctx);
+
+      // Pre-warm the cache by sending a message (which triggers participant lookup)
+      const callback = vi.fn();
+      setInboundCallback(callback);
+
+      const onRoomEvent = capturedPresenceInstance.onRoomEvent as (
+        roomId: string,
+        event: Record<string, unknown>,
+      ) => Promise<void>;
+
+      // Fire a participant_added event
+      await onRoomEvent("room-123", {
+        type: "participant_added",
+        roomId: "room-123",
+        payload: { chat_room_id: "room-123", participant_id: "user-new" },
+      });
+
+      // Should not deliver any message to callback
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it("should invalidate participant cache on participant_removed", async () => {
+      const ctx = createGatewayContext("default", mockAccountConfig, { aborted: true });
+      await thenvoiChannel.gateway!.startAccount(ctx);
+
+      const callback = vi.fn();
+      setInboundCallback(callback);
+
+      const onRoomEvent = capturedPresenceInstance.onRoomEvent as (
+        roomId: string,
+        event: Record<string, unknown>,
+      ) => Promise<void>;
+
+      // Fire a participant_removed event
+      await onRoomEvent("room-123", {
+        type: "participant_removed",
+        roomId: "room-123",
+        payload: { chat_room_id: "room-123", participant_id: "user-789" },
+      });
+
+      // Should not deliver any message to callback
+      expect(callback).not.toHaveBeenCalled();
+    });
+
     it("should skip non-text messages", async () => {
       const callback = vi.fn();
       setInboundCallback(callback);

@@ -37,13 +37,19 @@ function resolveToolsForRoom(roomId: string) {
 // Build Registrations via SDK
 // =============================================================================
 
-const registrations: McpToolRegistration[] = buildRoomScopedRegistrations(
-  resolveToolsForRoom,
-  {
-    enableContactTools: true,
-    enableMemoryTools: false,
-  },
-);
+let registrations: McpToolRegistration[];
+try {
+  registrations = buildRoomScopedRegistrations(
+    resolveToolsForRoom,
+    {
+      enableContactTools: true,
+      enableMemoryTools: false,
+    },
+  );
+} catch (error) {
+  console.error("[thenvoi] Failed to build MCP tool registrations from SDK:", error);
+  registrations = [];
+}
 
 // =============================================================================
 // Public API (compatible with existing consumers)

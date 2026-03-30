@@ -24,11 +24,13 @@ export interface ThenvoiAccountConfig {
   contactConfig?: ContactEventConfig;
 }
 
+export type SenderType = "User" | "Agent" | "System";
+
 export interface OpenClawInboundMessage {
   channelId: "thenvoi";
   threadId: string;
   senderId: string;
-  senderType: string;
+  senderType: SenderType;
   senderName: string;
   text: string;
   timestamp: string;
@@ -179,7 +181,7 @@ interface OpenClawRuntimeRef {
 // Virtual thread ID for contact events (dispatched to LLM for evaluation)
 // =============================================================================
 
-const CONTACTS_THREAD_ID = "__thenvoi_contacts__";
+export const CONTACTS_THREAD_ID = "__thenvoi_contacts__";
 
 // =============================================================================
 // Channel State
@@ -217,6 +219,7 @@ interface GatewayRegistry {
   roomToAccount: Map<string, string>;
   startingAccounts: Set<string>;
   lastSenderByThread: Map<string, { senderId: string; senderName: string }>;
+  participantCache: Map<string, { participants: Array<{ id: string; name: string }>; expiresAt: number }>;
   deliverInbound: ((message: OpenClawInboundMessage) => void) | null;
   openclawRuntime: OpenClawRuntimeRef | null;
 }
@@ -230,6 +233,7 @@ function getGatewayRegistry(): GatewayRegistry {
       roomToAccount: new Map(),
       startingAccounts: new Set(),
       lastSenderByThread: new Map(),
+      participantCache: new Map(),
       deliverInbound: null,
       openclawRuntime: null,
     };
@@ -372,16 +376,16 @@ type Mention = { id: string; name?: string };
 // Per-room participant cache with 5-second TTL to avoid hitting the REST API
 // on every outbound message in rapid back-and-forth conversations.
 const PARTICIPANT_CACHE_TTL_MS = 5_000;
-const participantCache = new Map<string, { participants: Array<{ id: string; name: string }>; expiresAt: number }>();
 
 async function getCachedParticipants(
   rest: ThenvoiLink["rest"],
   roomId: string,
 ): Promise<Array<{ id: string; name: string }>> {
-  const cached = participantCache.get(roomId);
+  const cache = registry().participantCache;
+  const cached = cache.get(roomId);
   if (cached && cached.expiresAt > Date.now()) return cached.participants;
   const participants = await rest.listChatParticipants(roomId);
-  participantCache.set(roomId, { participants, expiresAt: Date.now() + PARTICIPANT_CACHE_TTL_MS });
+  cache.set(roomId, { participants, expiresAt: Date.now() + PARTICIPANT_CACHE_TTL_MS });
   return participants;
 }
 
@@ -441,7 +445,14 @@ async function resolveMentions(
  * Throws on failure so callers (e.g. the dispatcher) can track and surface delivery errors.
  */
 async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, accountId: string, roomId: string, payload: unknown): Promise<void> {
-  const text = typeof payload === "string" ? payload : (payload as { text?: string })?.text;
+  let text: string | undefined;
+  if (typeof payload === "string") {
+    text = payload;
+  } else if (payload != null && typeof payload === "object" && "text" in payload) {
+    text = (payload as { text?: string }).text;
+  } else {
+    console.warn(`[thenvoi] Unexpected reply payload shape (room=${roomId}):`, typeof payload);
+  }
   if (!text) {
     throw new Error(`[thenvoi] No text in reply payload (room=${roomId})`);
   }
@@ -479,7 +490,7 @@ function platformEventToInboundMessage(event: PlatformEvent): OpenClawInboundMes
     channelId: "thenvoi",
     threadId: roomId,
     senderId: payload.sender_id,
-    senderType: payload.sender_type,
+    senderType: payload.sender_type as SenderType,
     senderName: payload.sender_name ?? "Unknown",
     text: payload.content,
     timestamp: payload.inserted_at,
@@ -691,7 +702,7 @@ export const thenvoiChannel: OpenClawChannel = {
               ? String((event.payload as Record<string, unknown>).chat_room_id)
               : undefined;
             const roomId = event.roomId ?? fallbackId;
-            if (roomId) participantCache.delete(roomId);
+            if (roomId) registry().participantCache.delete(roomId);
             return;
           }
 

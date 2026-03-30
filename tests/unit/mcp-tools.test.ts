@@ -150,7 +150,10 @@ describe("MCP Tools", () => {
         room_id: "room-001",
       });
 
-      expect(mockRest.listPeers).toHaveBeenCalled();
+      expect(mockRest.listPeers).toHaveBeenCalledWith(
+        expect.objectContaining({ notInChat: "room-001" }),
+        expect.anything(),
+      );
       expect(result).toBeDefined();
     });
   });
@@ -166,7 +169,7 @@ describe("MCP Tools", () => {
         room_id: "room-001",
       });
 
-      expect(mockRest.listChatParticipants).toHaveBeenCalled();
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001", expect.anything());
       expect(result).toBeDefined();
     });
   });
@@ -185,7 +188,7 @@ describe("MCP Tools", () => {
   });
 
   describe("thenvoi_send_event", () => {
-    it("should call createChatEvent", async () => {
+    it("should call createChatEvent with correct room and content", async () => {
       mockRest.createChatEvent.mockResolvedValue({ ok: true, id: "event-001" });
 
       const result = await executeMcpTool("thenvoi_send_event", {
@@ -194,7 +197,14 @@ describe("MCP Tools", () => {
         message_type: "thought",
       });
 
-      expect(mockRest.createChatEvent).toHaveBeenCalled();
+      expect(mockRest.createChatEvent).toHaveBeenCalledWith(
+        "room-001",
+        expect.objectContaining({
+          content: "Thinking about this...",
+          messageType: "thought",
+        }),
+        expect.anything(),
+      );
       expect(result).toBeDefined();
     });
   });
@@ -213,8 +223,12 @@ describe("MCP Tools", () => {
         mentions: ["John Doe"],
       });
 
-      expect(mockRest.listChatParticipants).toHaveBeenCalled();
-      expect(mockRest.createChatMessage).toHaveBeenCalled();
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001", expect.anything());
+      expect(mockRest.createChatMessage).toHaveBeenCalledWith(
+        "room-001",
+        expect.objectContaining({ content: "Hello!" }),
+        expect.anything(),
+      );
       expect(result).toBeDefined();
     });
 
@@ -245,8 +259,15 @@ describe("MCP Tools", () => {
         name: "Weather Agent",
       });
 
-      expect(mockRest.listPeers).toHaveBeenCalled();
-      expect(mockRest.addChatParticipant).toHaveBeenCalled();
+      expect(mockRest.listPeers).toHaveBeenCalledWith(
+        expect.objectContaining({ notInChat: "room-001" }),
+        expect.anything(),
+      );
+      expect(mockRest.addChatParticipant).toHaveBeenCalledWith(
+        "room-001",
+        expect.objectContaining({ participantId: "agent-weather" }),
+        expect.anything(),
+      );
       expect(result).toBeDefined();
     });
   });
@@ -264,8 +285,12 @@ describe("MCP Tools", () => {
         name: "John Doe",
       });
 
-      expect(mockRest.listChatParticipants).toHaveBeenCalled();
-      expect(mockRest.removeChatParticipant).toHaveBeenCalled();
+      expect(mockRest.listChatParticipants).toHaveBeenCalledWith("room-001", expect.anything());
+      expect(mockRest.removeChatParticipant).toHaveBeenCalledWith(
+        "room-001",
+        "user-789",
+        expect.anything(),
+      );
       expect(result).toBeDefined();
     });
   });

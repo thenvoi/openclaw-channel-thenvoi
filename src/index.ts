@@ -142,11 +142,11 @@ export default function plugin(api: OpenClawPluginApi): void {
 // =============================================================================
 
 // Channel exports
-export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } from "./channel.js";
+export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage, CONTACTS_THREAD_ID } from "./channel.js";
 export { getLink, getLinkForRoom, getAgentId, resetGatewayRegistry } from "./channel.js";
 
 // OpenClaw-specific type exports
-export type { ThenvoiAccountConfig, OpenClawInboundMessage } from "./channel.js";
+export type { ThenvoiAccountConfig, OpenClawInboundMessage, SenderType } from "./channel.js";
 
 // MCP tool exports
 export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";
