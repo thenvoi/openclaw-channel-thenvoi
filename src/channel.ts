@@ -468,6 +468,47 @@ async function sendReplyToThenvoi(rest: ThenvoiLink["rest"], agentId: string, ac
 }
 
 // =============================================================================
+// Dispatch Helpers
+// =============================================================================
+
+/**
+ * Build the inbound context object that OpenClaw's dispatchReplyFromConfig expects.
+ */
+function buildInboundCtx(message: OpenClawInboundMessage): Record<string, unknown> {
+  return {
+    Body: message.text,
+    RawBody: message.text,
+    BodyForCommands: message.text,
+    CommandBody: message.text,
+    From: message.senderId,
+    SenderId: message.senderId,
+    SenderName: message.senderName,
+    To: message.threadId,
+    SessionKey: `thenvoi:${message.threadId}`,
+    Surface: "thenvoi",
+    Provider: "thenvoi",
+    MessageSid: (message.metadata as Record<string, unknown>)?.messageId,
+    Timestamp: message.timestamp ? new Date(message.timestamp).getTime() : Date.now(),
+    ChatType: "group",
+    CommandAuthorized: true,
+  };
+}
+
+/**
+ * Create a no-op dispatcher for threads that don't send replies (e.g. contact events).
+ */
+function createNoopDispatcher() {
+  const noopSend = (): boolean => true;
+  return {
+    sendToolResult: noopSend,
+    sendBlockReply: noopSend,
+    sendFinalReply: noopSend,
+    waitForIdle: async (): Promise<void> => {},
+    getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
+  };
+}
+
+// =============================================================================
 // Event to Message Conversion
 // =============================================================================
 
@@ -727,39 +768,15 @@ export const thenvoiChannel: OpenClawChannel = {
                 trackSender(accountId, message.threadId, message.senderId, message.senderName);
               }
 
-              const inboundCtx = {
-                Body: message.text,
-                RawBody: message.text,
-                BodyForCommands: message.text,
-                CommandBody: message.text,
-                From: message.senderId,
-                SenderId: message.senderId,
-                SenderName: message.senderName,
-                To: message.threadId,
-                SessionKey: `thenvoi:${message.threadId}`,
-                Surface: "thenvoi",
-                Provider: "thenvoi",
-                MessageSid: (message.metadata as Record<string, unknown>)?.messageId,
-                Timestamp: message.timestamp ? new Date(message.timestamp).getTime() : Date.now(),
-                ChatType: "group",
-                CommandAuthorized: true,
-              };
+              const inboundCtx = buildInboundCtx(message);
 
               // Contact events use a virtual thread — don't try to send to Thenvoi
               const isContactThread = message.threadId === CONTACTS_THREAD_ID;
 
               const threadId = message.threadId;
 
-              // For contact threads, use a no-op dispatcher — no replies to send
-              const noopSend = (): boolean => true;
               const dispatcher = isContactThread
-                ? {
-                    sendToolResult: noopSend,
-                    sendBlockReply: noopSend,
-                    sendFinalReply: noopSend,
-                    waitForIdle: async (): Promise<void> => {},
-                    getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
-                  }
+                ? createNoopDispatcher()
                 : (() => {
                     // Track pending reply promises so waitForIdle can await them
                     const pendingReplies: Promise<void>[] = [];
@@ -859,33 +876,8 @@ export const thenvoiChannel: OpenClawChannel = {
               const rt = registry().openclawRuntime;
               const dispatchFn = rt?.channel?.reply?.dispatchReplyFromConfig;
               if (rt?.config && dispatchFn) {
-                const inboundCtx = {
-                  Body: message.text,
-                  RawBody: message.text,
-                  BodyForCommands: message.text,
-                  CommandBody: message.text,
-                  From: message.senderId,
-                  SenderId: message.senderId,
-                  SenderName: message.senderName,
-                  To: message.threadId,
-                  SessionKey: `thenvoi:${message.threadId}`,
-                  Surface: "thenvoi",
-                  Provider: "thenvoi",
-                  MessageSid: undefined,
-                  Timestamp: Date.now(),
-                  ChatType: "group",
-                  CommandAuthorized: true,
-                };
-
-                // Contact thread — no replies to send back to Thenvoi
-                const noopSend = (): boolean => true;
-                const dispatcher = {
-                  sendToolResult: noopSend,
-                  sendBlockReply: noopSend,
-                  sendFinalReply: noopSend,
-                  waitForIdle: async (): Promise<void> => {},
-                  getQueuedCounts: () => ({ tool: 0, block: 0, final: 0 }),
-                };
+                const inboundCtx = buildInboundCtx(message);
+                const dispatcher = createNoopDispatcher();
 
                 console.log(`[thenvoi:${accountId}] Dispatching contact event to OpenClaw agent: ${event.type}`);
                 const cfg = rt.config.loadConfig();
