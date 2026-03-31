@@ -218,6 +218,7 @@ interface SyncState {
   syncPointMessageId: string | null;
   pendingWsEvents: Array<{ roomId: string; event: PlatformEvent }>;
   processedMessageIds: Set<string>;
+  dedupTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface GatewayRegistry {
@@ -275,6 +276,7 @@ function getSyncState(accountId: string): SyncState {
       syncPointMessageId: null,
       pendingWsEvents: [],
       processedMessageIds: new Set(),
+      dedupTimer: null,
     };
     states.set(accountId, state);
   }
@@ -400,6 +402,7 @@ type Mention = { id: string; name?: string };
 // Per-room participant cache with 5-second TTL to avoid hitting the REST API
 // on every outbound message in rapid back-and-forth conversations.
 const PARTICIPANT_CACHE_TTL_MS = 5_000;
+const MAX_PARTICIPANT_CACHE = 200;
 
 async function getCachedParticipants(
   rest: ThenvoiLink["rest"],
@@ -409,6 +412,12 @@ async function getCachedParticipants(
   const cached = cache.get(roomId);
   if (cached && cached.expiresAt > Date.now()) return cached.participants;
   const participants = await rest.listChatParticipants(roomId);
+  // LRU eviction: delete-and-reinsert to maintain insertion order
+  cache.delete(roomId);
+  if (cache.size >= MAX_PARTICIPANT_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
+  }
   cache.set(roomId, { participants, expiresAt: Date.now() + PARTICIPANT_CACHE_TTL_MS });
   return participants;
 }
@@ -799,9 +808,8 @@ export const thenvoiChannel: OpenClawChannel = {
             return;
           }
 
-          // Skip messages from our own agent or other agents (prevent bot loops)
+          // Skip messages from our own agent
           if (event.payload.sender_id === config.agentId) return;
-          if (event.payload.sender_type === "Agent") return;
 
           // Skip messages not mentioning this agent — the platform may deliver
           // all room messages via getNextMessage, but each agent should only
@@ -966,6 +974,8 @@ export const thenvoiChannel: OpenClawChannel = {
         // sync and dedup against processedMessageIds.
         {
           const sync = getSyncState(accountId);
+          // Cancel any pending dedup timer from a previous sync cycle (rapid reconnect)
+          if (sync.dedupTimer) { clearTimeout(sync.dedupTimer); sync.dedupTimer = null; }
           sync.isSyncing = true;
           sync.processedMessageIds.clear();
           sync.pendingWsEvents = [];
@@ -1003,11 +1013,6 @@ export const thenvoiChannel: OpenClawChannel = {
 
                 const isSyncPoint = sync.syncPointMessageId !== null && msgId === sync.syncPointMessageId;
 
-                // Mark as processing to advance the queue
-                try {
-                  await link.markProcessing(roomId, msgId);
-                } catch { /* best effort */ }
-
                 const senderId = String(m.senderId ?? "");
                 const senderType = String(m.senderType ?? "User");
                 const msgMetadata = (m.metadata ?? {}) as Record<string, unknown>;
@@ -1015,7 +1020,6 @@ export const thenvoiChannel: OpenClawChannel = {
                 const notMentioned = msgMentions && msgMentions.length > 0 && !msgMentions.some((mention) => mention.id === config.agentId);
                 const shouldSkip =
                   senderId === config.agentId ||
-                  senderType === "Agent" ||
                   String(m.messageType ?? "text") !== "text" ||
                   notMentioned;
 
@@ -1023,7 +1027,7 @@ export const thenvoiChannel: OpenClawChannel = {
                   try {
                     await link.markProcessing(roomId, msgId);
                     await link.markProcessed(roomId, msgId);
-                  } catch { /* best effort for skipped messages */ }
+                  } catch { /* best effort */ }
                   sync.processedMessageIds.add(msgId);
                   skipped++;
                   if (isSyncPoint) break;
@@ -1081,9 +1085,13 @@ export const thenvoiChannel: OpenClawChannel = {
                 await roomHandler(roomId, syntheticEvent as PlatformEvent);
                 sync.isSyncing = true;
 
-                // Now mark all collected messages as processed for WS dedup
+                // Mark all collected messages as processed (both REST lifecycle and WS dedup)
                 for (const msg of collected) {
                   sync.processedMessageIds.add(msg.id);
+                  try {
+                    await link.markProcessing(roomId, msg.id);
+                    await link.markProcessed(roomId, msg.id);
+                  } catch { /* best effort */ }
                 }
               }
 
@@ -1119,7 +1127,7 @@ export const thenvoiChannel: OpenClawChannel = {
           // Clear sync state (keep processedMessageIds briefly for late dedup)
           sync.syncPointMessageId = null;
           // Clear processedMessageIds after a short delay to catch any late WS duplicates
-          setTimeout(() => { sync.processedMessageIds.clear(); }, 10_000);
+          sync.dedupTimer = setTimeout(() => { sync.processedMessageIds.clear(); sync.dedupTimer = null; }, 10_000);
 
           console.log(`[thenvoi:${accountId}] Backlog sync finished`);
         }
@@ -1142,6 +1150,21 @@ export const thenvoiChannel: OpenClawChannel = {
     stopAccount: async (ctx: GatewayContext): Promise<void> => {
       const { accountId } = ctx;
       registry().startingAccounts.delete(accountId);
+
+      // Clean up sync state (cancel any pending dedup timer)
+      const sync = registry().syncStates.get(accountId);
+      if (sync?.dedupTimer) clearTimeout(sync.dedupTimer);
+      registry().syncStates.delete(accountId);
+
+      // Remove orphan roomToAccount entries for this account
+      for (const [roomId, acct] of registry().roomToAccount) {
+        if (acct === accountId) registry().roomToAccount.delete(roomId);
+      }
+
+      // Clean up per-account sender and participant caches
+      for (const key of registry().lastSenderByThread.keys()) {
+        if (key.startsWith(`${accountId}:`)) registry().lastSenderByThread.delete(key);
+      }
 
       const presence = presences().get(accountId);
       if (presence) {

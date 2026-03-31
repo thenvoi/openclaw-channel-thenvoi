@@ -48,7 +48,11 @@ try {
   );
 } catch (error) {
   console.error("[thenvoi] Failed to build MCP tool registrations from SDK:", error);
-  registrations = [];
+  throw error;
+}
+
+if (registrations.length === 0) {
+  console.error("[thenvoi] SDK returned zero tool registrations — this is unexpected with contact tools enabled");
 }
 
 // =============================================================================
