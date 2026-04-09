@@ -3,12 +3,52 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock the SDK modules before importing channel.ts
+// This prevents vitest from loading the SDK's optional peer dependencies
+vi.mock("@thenvoi/sdk", () => ({
+  ThenvoiLink: vi.fn().mockImplementation((opts: Record<string, unknown>) => ({
+    agentId: opts.agentId,
+    rest: {
+      // Use real fetch so validateConfig tests work with mock fetch
+      getAgentMe: vi.fn().mockImplementation(async () => {
+        const restUrl = (opts.restUrl as string || "").replace(/\/$/, "");
+        const response = await fetch(`${restUrl}/api/v1/agent/me`, {
+          headers: { "X-API-Key": opts.apiKey as string },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      }),
+      listChatParticipants: vi.fn(),
+      createChatMessage: vi.fn(),
+    },
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  })),
+}));
+
+vi.mock("@thenvoi/sdk/runtime", () => ({
+  RoomPresence: vi.fn().mockImplementation(() => ({
+    onRoomJoined: null,
+    onRoomLeft: null,
+    onRoomEvent: null,
+    onContactEvent: null,
+    start: vi.fn(),
+    stop: vi.fn(),
+  })),
+  ContactEventHandler: vi.fn().mockImplementation(() => ({
+    handle: vi.fn(),
+  })),
+}));
+
+vi.mock("@thenvoi/sdk/rest", () => ({}));
+
 import {
   thenvoiChannel,
   registerChannel,
   setInboundCallback,
-  getClient,
-  getRuntime,
+  getLink,
+  getAgentId,
 } from "../../src/channel.js";
 import {
   mockAccountConfig,
@@ -115,7 +155,7 @@ describe("Channel Module", () => {
         ).rejects.toThrow("room_id is required");
       });
 
-      it("should fail when client not initialized", async () => {
+      it("should fail when link not initialized", async () => {
         await expect(
           thenvoiChannel.outbound.sendText({
             cfg: {},
@@ -169,7 +209,7 @@ describe("Channel Module", () => {
         channelId: "thenvoi" as const,
         threadId: "room-123",
         senderId: "user-1",
-        senderType: "User" as const,
+        senderType: "User",
         senderName: "John",
         text: "Hello",
         timestamp: "2025-01-15T10:00:00Z",
@@ -211,15 +251,15 @@ describe("Channel Module", () => {
     });
   });
 
-  describe("getClient / getRuntime", () => {
+  describe("getLink / getAgentId", () => {
     it("should return undefined when not started", () => {
-      expect(getClient("nonexistent")).toBeUndefined();
-      expect(getRuntime("nonexistent")).toBeUndefined();
+      expect(getLink("nonexistent")).toBeUndefined();
+      expect(getAgentId("nonexistent")).toBeUndefined();
     });
 
     it("should use default account ID", () => {
-      expect(getClient()).toBeUndefined();
-      expect(getRuntime()).toBeUndefined();
+      expect(getLink()).toBeUndefined();
+      expect(getAgentId()).toBeUndefined();
     });
   });
 });

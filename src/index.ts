@@ -2,30 +2,7 @@
  * OpenClaw Channel Plugin for Thenvoi.
  *
  * This plugin enables OpenClaw agents to connect to the Thenvoi platform,
- * allowing them to:
- *
- * 1. Receive messages from other Thenvoi agents and users
- * 2. Send messages back to Thenvoi chat rooms
- * 3. Use platform tools (lookup peers, manage participants, create rooms)
- * 4. Participate in multiple rooms simultaneously
- *
- * @example
- * ```yaml
- * # openclaw.yaml
- * channels:
- *   thenvoi:
- *     accounts:
- *       default:
- *         enabled: true
- * ```
- *
- * Required environment variables:
- * - THENVOI_API_KEY: API key for authentication
- * - THENVOI_AGENT_ID: Agent identifier on Thenvoi
- *
- * Optional environment variables:
- * - THENVOI_WS_URL: WebSocket endpoint (default: wss://app.thenvoi.com/api/v1/socket)
- * - THENVOI_REST_URL: REST API endpoint (default: https://app.thenvoi.com)
+ * using @thenvoi/sdk for all platform communication.
  *
  * @packageDocumentation
  */
@@ -60,8 +37,7 @@ interface OpenClawPluginApi {
   registerChannel: (options: { plugin: typeof thenvoiChannel }) => void;
   registerMcpTools?: (tools: ReturnType<typeof getMcpToolSchemas>) => void;
   // OpenClaw provides a callback setter for inbound message delivery
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onInboundMessage?: (setter: any) => void;
+  onInboundMessage?: (setter: (cb: (message: unknown) => void) => void) => void;
   // Hook registration for lifecycle events
   on?: (
     hookName: "before_agent_start",
@@ -70,83 +46,90 @@ interface OpenClawPluginApi {
       ctx: PluginHookAgentContext
     ) => PluginHookBeforeAgentStartResult | void
   ) => void;
+  // OpenClaw runtime reference for dispatch (not in public API, provided dynamically)
+  runtime?: unknown;
+  // Tool registration (singular, provided dynamically by OpenClaw)
+  registerTool?: (tool: {
+    name: string;
+    description: string;
+    parameters: unknown;
+    execute: (toolCallId: unknown, input: unknown) => Promise<unknown>;
+  }) => void;
 }
 
 /**
  * OpenClaw plugin entry point.
- *
- * This function is called by OpenClaw when the plugin is loaded.
- * It registers the Thenvoi channel and MCP tools.
- *
- * Connection lifecycle is managed by the channel gateway (startAccount/stopAccount),
- * not by a separate service.
  */
 export default function plugin(api: OpenClawPluginApi): void {
-  // Debug: Log available API methods
   console.log("[thenvoi] OpenClaw Plugin API keys:", Object.keys(api));
 
   // Store OpenClaw runtime for message dispatch
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const runtime = (api as any).runtime;
-  if (runtime) {
-    setOpenClawRuntime(runtime);
+  if (api.runtime) {
+    setOpenClawRuntime(api.runtime);
   }
 
   // Register the channel (handles connection via gateway.startAccount/stopAccount)
   registerChannel(api);
 
   // Register MCP tools - OpenClaw uses registerTool (singular) for each tool
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registerTool = (api as any).registerTool;
-  if (registerTool) {
+  if (api.registerTool) {
+    const registerTool = api.registerTool;
     const toolSchemas = getMcpToolSchemas();
     console.log(`[thenvoi] Registering ${toolSchemas.length} tools:`, toolSchemas.map(t => t.name));
+    let registered = 0;
     for (const tool of toolSchemas) {
-      registerTool({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.inputSchema,
-        // OpenClaw execute signature: (toolCallId: string, input: object) => AgentToolResult
-        // Result format: { content: [{ type: "text", text: "..." }], details: payload }
-        execute: async (_toolCallId: unknown, input: unknown) => {
-          console.log(`[thenvoi] Executing tool ${tool.name}`);
-          try {
-            const result = await executeMcpTool(tool.name, input ?? {});
-            const resultStr = JSON.stringify(result, null, 2);
-            console.log(`[thenvoi] Tool ${tool.name} completed`);
+      try {
+        registerTool({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+          execute: async (_toolCallId: unknown, input: unknown) => {
+            console.log(`[thenvoi] Executing tool ${tool.name}`);
+            try {
+              const result = await executeMcpTool(tool.name, input ?? {});
+              const resultStr = JSON.stringify(result, null, 2);
+              console.log(`[thenvoi] Tool ${tool.name} completed`);
 
-            // Return in OpenClaw's expected AgentToolResult format
-            return {
-              content: [{ type: "text", text: resultStr }],
-              details: result,
-            };
-          } catch (error) {
-            console.error(`[thenvoi] Tool ${tool.name} error:`, error);
-            throw error;
-          }
-        },
-      });
+              return {
+                content: [{ type: "text", text: resultStr }],
+                details: result,
+              };
+            } catch (error) {
+              console.error(`[thenvoi] Tool ${tool.name} error:`, error);
+              throw error;
+            }
+          },
+        });
+        registered++;
+      } catch (error) {
+        console.error(`[thenvoi] Failed to register tool ${tool.name}:`, error);
+      }
     }
-    console.log("[thenvoi] Tools registered successfully");
+    console.log(`[thenvoi] ${registered}/${toolSchemas.length} tools registered`);
   } else {
     console.warn("[thenvoi] WARNING: api.registerTool is not available - tools will NOT be registered!");
     console.warn("[thenvoi] Available API methods:", Object.keys(api));
   }
 
-  // Register before_agent_start hook to inject Thenvoi instructions
-  // Always inject so agent knows how to use Thenvoi tools even when initiating from other channels
-  // The prompt itself contains "When NOT to Use" guidance for non-Thenvoi contexts
+  // Register before_agent_start hook to inject Thenvoi instructions + room context
   if (api.on) {
     api.on("before_agent_start", (_event, ctx) => {
-      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider})`);
-      return {
-        prependContext: BASE_INSTRUCTIONS,
-      };
+      console.log(`[thenvoi] before_agent_start hook called (messageProvider=${ctx.messageProvider}, sessionKey=${ctx.sessionKey})`);
+
+      // Extract room_id from sessionKey (format: "thenvoi:{roomId}")
+      const roomId = ctx.sessionKey?.startsWith("thenvoi:") ? ctx.sessionKey.slice("thenvoi:".length) : undefined;
+
+      let prependContext = BASE_INSTRUCTIONS;
+      if (roomId) {
+        prependContext += `\n\n## Current Thenvoi Room\n\n**Your current room_id is: \`${roomId}\`**\nUse this value for any tool parameter that asks for \`room_id\`. Do NOT use any other UUID.`;
+      }
+
+      return { prependContext };
     });
     console.log("[thenvoi] Registered before_agent_start hook for instruction injection");
   }
 
-  // Set up inbound message delivery - OpenClaw provides a callback for message delivery
+  // Set up inbound message delivery
   if (api.onInboundMessage) {
     api.onInboundMessage(setInboundCallback);
   }
@@ -159,18 +142,11 @@ export default function plugin(api: OpenClawPluginApi): void {
 // =============================================================================
 
 // Channel exports
-export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage } from "./channel.js";
-export { getClient, getRuntime } from "./channel.js";
+export { thenvoiChannel, registerChannel, setInboundCallback, deliverMessage, CONTACTS_THREAD_ID } from "./channel.js";
+export { getLink, getLinkForRoom, getAgentId, resetGatewayRegistry } from "./channel.js";
 
-// Runtime exports
-export { ThenvoiRuntime } from "./runtime.js";
-export type { RuntimeCallbacks } from "./runtime.js";
-
-// Client exports
-export { ThenvoiClient } from "./thenvoi-client.js";
-
-// WebSocket exports
-export { RateLimitAwareWebSocket } from "./rate-limit-websocket.js";
+// OpenClaw-specific type exports
+export type { ThenvoiAccountConfig, OpenClawInboundMessage, SenderType } from "./channel.js";
 
 // MCP tool exports
 export { mcpTools, getMcpToolSchemas, executeMcpTool, getMcpTool } from "./mcp-tools.js";
@@ -183,58 +159,23 @@ export {
   buildSystemPrompt,
 } from "./prompts.js";
 
-// Contact handler exports
-export { ContactEventHandler, CONTACTS_THREAD_ID } from "./contact-handler.js";
-export type { ContactEventDispatchCallback, BroadcastCallback, ContactEventHandlerOptions } from "./contact-handler.js";
-
-// Contact state persistence exports
-export { ContactStateStore } from "./contact-state-store.js";
-export type { ContactPersistedState } from "./contact-state-store.js";
-
-// Type exports
+// Re-export key SDK types for consumers
 export type {
-  // Configuration
-  ThenvoiConfig,
-  ThenvoiAccountConfig,
-  ThenvoiChannelConfig,
-  // Contact event configuration
-  ContactEventStrategy,
   ContactEventConfig,
+  ContactEventStrategy,
   ContactEventCallback,
   ContactEvent,
-  ContactRequestReceivedPayload,
-  ContactRequestUpdatedPayload,
-  ContactAddedPayload,
-  ContactRemovedPayload,
-  // Messages
-  MessageCreatedPayload,
-  MessageMetadata,
-  MessageType,
-  Mention,
-  // Rooms
-  RoomAddedPayload,
-  RoomRemovedPayload,
-  RoomState,
-  // Participants
-  Participant,
-  ParticipantAddedPayload,
-  ParticipantRemovedPayload,
-  ParticipantRole,
-  // Peers
-  Peer,
-  LookupPeersResponse,
-  // OpenClaw integration
-  OpenClawInboundMessage,
-  OpenClawOutboundMessage,
-  // MCP tool params
-  LookupPeersParams,
-  AddParticipantParams,
-  RemoveParticipantParams,
-  GetParticipantsParams,
-  CreateChatroomParams,
-  SendEventParams,
-  // Errors
-  ThenvoiError,
-  ThenvoiConnectionError,
-  ThenvoiAuthError,
-} from "./types.js";
+  PlatformEvent,
+} from "@thenvoi/sdk";
+
+export { ThenvoiLink } from "@thenvoi/sdk";
+
+export type {
+  AgentIdentity,
+  ChatParticipant,
+} from "@thenvoi/sdk/rest";
+
+export { ContactEventHandler, RoomPresence, AgentTools } from "@thenvoi/sdk/runtime";
+
+export { buildRoomScopedRegistrations, buildSingleContextRegistrations } from "@thenvoi/sdk/mcp";
+export type { McpToolRegistration } from "@thenvoi/sdk/mcp";

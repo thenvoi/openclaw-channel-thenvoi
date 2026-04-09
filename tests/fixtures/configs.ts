@@ -2,10 +2,14 @@
  * Test configuration fixtures for Thenvoi channel plugin tests.
  */
 
-import type {
-  ThenvoiConfig,
-  ThenvoiAccountConfig,
-} from "../../src/types.js";
+import type { ThenvoiAccountConfig } from "../../src/channel.js";
+
+interface ThenvoiConfig {
+  apiKey: string;
+  agentId: string;
+  wsUrl: string;
+  restUrl: string;
+}
 
 // =============================================================================
 // Thenvoi Config Fixtures

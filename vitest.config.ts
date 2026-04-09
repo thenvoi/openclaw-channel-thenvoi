@@ -4,14 +4,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["tests/**/*.test.ts"],
-    exclude: ["node_modules", "dist"],
+    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    exclude: ["node_modules", "dist", "tests/e2e/**"],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.ts"],
-      exclude: ["src/index.ts", "src/types.ts"],
+      exclude: ["src/index.ts"],
       thresholds: {
         global: {
           branches: 80,
