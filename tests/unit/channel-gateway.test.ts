@@ -8,8 +8,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 let capturedPresenceInstance: Record<string, unknown>;
 let mockLinkInstance: Record<string, unknown>;
 
-vi.mock("@thenvoi/sdk", () => ({
-  ThenvoiLink: vi.fn().mockImplementation((opts: Record<string, unknown>) => {
+vi.mock("@thenvoi/sdk", () => {
+  const ThenvoiLink = vi.fn(function (this: Record<string, unknown>, opts: Record<string, unknown>) {
     mockLinkInstance = {
       agentId: opts.agentId,
       rest: {
@@ -25,12 +25,14 @@ vi.mock("@thenvoi/sdk", () => ({
       markProcessing: vi.fn().mockResolvedValue(undefined),
       markProcessed: vi.fn().mockResolvedValue(undefined),
     };
+    Object.assign(this, mockLinkInstance);
     return mockLinkInstance;
-  }),
-}));
+  });
+  return { ThenvoiLink };
+});
 
-vi.mock("@thenvoi/sdk/runtime", () => ({
-  RoomPresence: vi.fn().mockImplementation(() => {
+vi.mock("@thenvoi/sdk/runtime", () => {
+  const RoomPresence = vi.fn(function (this: Record<string, unknown>) {
     capturedPresenceInstance = {
       onRoomJoined: null,
       onRoomLeft: null,
@@ -39,12 +41,16 @@ vi.mock("@thenvoi/sdk/runtime", () => ({
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
     };
+    Object.assign(this, capturedPresenceInstance);
     return capturedPresenceInstance;
-  }),
-  ContactEventHandler: vi.fn().mockImplementation(() => ({
-    handle: vi.fn().mockResolvedValue(undefined),
-  })),
-}));
+  });
+  const ContactEventHandler = vi.fn(function (this: Record<string, unknown>) {
+    const instance = { handle: vi.fn().mockResolvedValue(undefined) };
+    Object.assign(this, instance);
+    return instance;
+  });
+  return { RoomPresence, ContactEventHandler };
+});
 
 vi.mock("@thenvoi/sdk/rest", () => ({}));
 
