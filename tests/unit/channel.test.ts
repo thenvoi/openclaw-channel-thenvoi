@@ -6,40 +6,52 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the SDK modules before importing channel.ts
 // This prevents vitest from loading the SDK's optional peer dependencies
-vi.mock("@thenvoi/sdk", () => ({
-  ThenvoiLink: vi.fn().mockImplementation((opts: Record<string, unknown>) => ({
-    agentId: opts.agentId,
-    rest: {
-      // Use real fetch so validateConfig tests work with mock fetch
-      getAgentMe: vi.fn().mockImplementation(async () => {
-        const restUrl = (opts.restUrl as string || "").replace(/\/$/, "");
-        const response = await fetch(`${restUrl}/api/v1/agent/me`, {
-          headers: { "X-API-Key": opts.apiKey as string },
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
-      }),
-      listChatParticipants: vi.fn(),
-      createChatMessage: vi.fn(),
-    },
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-  })),
-}));
+vi.mock("@thenvoi/sdk", () => {
+  const ThenvoiLink = vi.fn(function (this: Record<string, unknown>, opts: Record<string, unknown>) {
+    const instance = {
+      agentId: opts.agentId,
+      rest: {
+        // Use real fetch so validateConfig tests work with mock fetch
+        getAgentMe: vi.fn().mockImplementation(async () => {
+          const restUrl = (opts.restUrl as string || "").replace(/\/$/, "");
+          const response = await fetch(`${restUrl}/api/v1/agent/me`, {
+            headers: { "X-API-Key": opts.apiKey as string },
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        }),
+        listChatParticipants: vi.fn(),
+        createChatMessage: vi.fn(),
+      },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    Object.assign(this, instance);
+    return instance;
+  });
+  return { ThenvoiLink };
+});
 
-vi.mock("@thenvoi/sdk/runtime", () => ({
-  RoomPresence: vi.fn().mockImplementation(() => ({
-    onRoomJoined: null,
-    onRoomLeft: null,
-    onRoomEvent: null,
-    onContactEvent: null,
-    start: vi.fn(),
-    stop: vi.fn(),
-  })),
-  ContactEventHandler: vi.fn().mockImplementation(() => ({
-    handle: vi.fn(),
-  })),
-}));
+vi.mock("@thenvoi/sdk/runtime", () => {
+  const RoomPresence = vi.fn(function (this: Record<string, unknown>) {
+    const instance = {
+      onRoomJoined: null,
+      onRoomLeft: null,
+      onRoomEvent: null,
+      onContactEvent: null,
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    Object.assign(this, instance);
+    return instance;
+  });
+  const ContactEventHandler = vi.fn(function (this: Record<string, unknown>) {
+    const instance = { handle: vi.fn() };
+    Object.assign(this, instance);
+    return instance;
+  });
+  return { RoomPresence, ContactEventHandler };
+});
 
 vi.mock("@thenvoi/sdk/rest", () => ({}));
 
