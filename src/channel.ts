@@ -746,9 +746,15 @@ export const thenvoiChannel: OpenClawChannel = {
         links().set(accountId, link);
         console.log(`[thenvoi:${accountId}] Link created`);
 
-        // Connect WebSocket
-        await link.connect();
-        console.log(`[thenvoi:${accountId}] WebSocket connected`);
+        // Connect WebSocket — catch errors so a transient failure (e.g. HTTP 429)
+        // doesn't propagate out of startAccount and kill the account permanently.
+        // The SDK's internal reconnection logic will retry in the background.
+        try {
+          await link.connect();
+          console.log(`[thenvoi:${accountId}] WebSocket connected`);
+        } catch (connectError) {
+          console.error(`[thenvoi:${accountId}] Initial connect failed (will retry via SDK reconnection):`, connectError);
+        }
 
         // Create RoomPresence for automatic room subscription management
         const presence = new RoomPresence({
