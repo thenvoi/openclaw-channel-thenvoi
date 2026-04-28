@@ -227,6 +227,64 @@ describe("Channel Gateway Lifecycle", () => {
       expect(firstLink.disconnect).toHaveBeenCalled();
     });
 
+    it("should recover from connect() failure and keep blocking on abortSignal", async () => {
+      const connectError = new Error("HTTP 429: Too Many Requests");
+
+      // Override the ThenvoiLink mock so the NEXT instance's connect() rejects
+      const { ThenvoiLink } = await import("@thenvoi/sdk");
+      vi.mocked(ThenvoiLink).mockImplementationOnce((opts: Record<string, unknown>) => {
+        mockLinkInstance = {
+          agentId: opts.agentId,
+          rest: {
+            getAgentMe: vi.fn().mockResolvedValue({ id: opts.agentId }),
+            listChatParticipants: vi.fn().mockResolvedValue([]),
+            createChatMessage: vi.fn().mockResolvedValue({ ok: true }),
+          },
+          connect: vi.fn().mockRejectedValue(connectError),
+          disconnect: vi.fn().mockResolvedValue(undefined),
+          markProcessing: vi.fn().mockResolvedValue(undefined),
+          markProcessed: vi.fn().mockResolvedValue(undefined),
+        };
+        return mockLinkInstance as ReturnType<typeof ThenvoiLink>;
+      });
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const controller = new AbortController();
+      const ctx = {
+        cfg: {},
+        accountId: "recovering",
+        account: mockAccountConfig,
+        abortSignal: controller.signal,
+      };
+
+      let resolved = false;
+      const promise = thenvoiChannel.gateway!.startAccount(ctx).then(() => {
+        resolved = true;
+      });
+
+      // Give it a tick to process
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Error was caught and logged — startAccount did NOT reject
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Initial connect failed"),
+        connectError,
+      );
+
+      // Still blocking on abortSignal (not rejected, not resolved)
+      expect(resolved).toBe(false);
+
+      // Presence was still started despite connect failure
+      expect(capturedPresenceInstance.start).toHaveBeenCalled();
+
+      // Clean up
+      controller.abort();
+      await promise;
+      expect(resolved).toBe(true);
+      errorSpy.mockRestore();
+    });
+
     it("should block until abort signal fires", async () => {
       const controller = new AbortController();
       const ctx = {
