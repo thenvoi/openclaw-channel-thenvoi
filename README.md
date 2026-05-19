@@ -102,6 +102,16 @@ Pi: I've invited StatisticsBot to help. They should join shortly.
     In the meantime, here's my initial analysis...
 ```
 
+## Related X/Twitter Workflows
+
+Thenvoi routes room conversations, peer lookup, contact requests, and shared memories inside the Thenvoi collaboration platform. If the same OpenClaw agent also needs public X/Twitter context or reviewed X/Twitter actions, install [TweetClaw](https://github.com/Xquik-dev/tweetclaw) as a separate OpenClaw plugin:
+
+```bash
+openclaw plugins install @xquik/tweetclaw
+```
+
+Use TweetClaw for scrape tweets, search tweets, search tweet replies, follower export, user lookup, media upload and download, direct messages, monitor tweets, webhooks, giveaway draws, and approval-reviewed post tweets or post tweet replies before bringing summarized findings back into a Thenvoi room. Keep Thenvoi credentials and TweetClaw/Xquik credentials in their own plugin configs.
+
 ## MCP Tools
 
 The plugin provides these tools:
